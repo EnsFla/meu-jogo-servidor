@@ -41,10 +41,12 @@ const gameRooms = {};
 function createPlayerState() {
     return {
         id: null,
+        nickname: "Anon", // NOVO
         vidas: 3,
         dinheiro: 0,
         lastSendTime: 0, // NOVO: Para cooldown de envio
         isAlive: true, // NOVO: Para modo 10p
+        isHost: false, // NOVO: Para botão de start
         upgrades: {
             missil: 0,
             tiroDuplo: 0,
@@ -82,40 +84,66 @@ function getPlayerSendCooldown(player) {
 io.on('connection', (socket) => {
     console.log(`Socket conectado: ${socket.id}`);
 
-    // 1. Entrar na Sala (Limite de 10)
-    socket.on('joinRoom', (roomId) => {
+    // 1. Entrar na Sala (ATUALIZADO com Nickname e Host)
+    socket.on('joinRoom', (data) => {
+        const { roomId, nickname } = data;
         socket.join(roomId);
-        console.log(`Socket ${socket.id} entrou na sala ${roomId}`);
+        console.log(`Socket ${socket.id} (Nick: ${nickname}) entrou na sala ${roomId}`);
 
         if (!gameRooms[roomId]) {
             gameRooms[roomId] = { players: {}, gameRunning: false, intervals: {} };
         }
         const room = gameRooms[roomId];
 
+        // Se o jogo já começou, entra como espectador (lógica não implementada, apenas rejeita)
+        if (room.gameRunning) {
+             socket.emit('roomFull'); // Reutilizando evento
+             socket.leave(roomId);
+             return;
+        }
+
         // ATUALIZADO: Limite de 10 jogadores
         if (Object.keys(room.players).length < 10) {
             room.players[socket.id] = createPlayerState();
             room.players[socket.id].id = socket.id;
+            room.players[socket.id].nickname = nickname || "Anon";
 
-            // ATUALIZADO: Começa o jogo se houver 2 ou mais
-            if (Object.keys(room.players).length >= 2 && !room.gameRunning) {
-                console.log(`Sala ${roomId} atingiu 2 jogadores. Começando o jogo.`);
-                room.gameRunning = true;
-                
-                // Envia o 'gameStart' para todos na sala
-                io.to(roomId).emit('gameStart', room);
-                
-                // Inicia os loops do servidor para esta sala
-                room.intervals.income = startIncomeLoop(roomId);
-                room.intervals.neutralSpawn = startNeutralSpawnLoop(roomId);
+            // O primeiro jogador se torna o Host
+            if (Object.keys(room.players).length === 1) {
+                room.players[socket.id].isHost = true;
             }
+
+            // REMOVIDO: Auto-start
+            
         } else {
             socket.emit('roomFull');
+            socket.leave(roomId);
         }
+        
+        // Envia o estado do lobby para todos
         io.to(roomId).emit('updateGameState', room);
     });
 
-    // 2. Comprar Upgrade
+    // 2. NOVO: Host inicia o jogo
+    socket.on('startGame', (roomId) => {
+        const room = gameRooms[roomId];
+        const player = room?.players[socket.id];
+        
+        // Só o Host pode começar, e só se o jogo não começou
+        if (player && player.isHost && room && !room.gameRunning) {
+            console.log(`Sala ${roomId} iniciada pelo Host ${player.nickname}`);
+            room.gameRunning = true;
+            
+            // Envia o 'gameStart' para todos na sala
+            io.to(roomId).emit('gameStart', room);
+            
+            // Inicia os loops do servidor para esta sala
+            room.intervals.income = startIncomeLoop(roomId);
+            room.intervals.neutralSpawn = startNeutralSpawnLoop(roomId);
+        }
+    });
+
+    // 3. Comprar Upgrade
     socket.on('buyUpgrade', (data) => {
         const { roomId, upgradeKey } = data;
         const room = gameRooms[roomId];
@@ -137,24 +165,24 @@ io.on('connection', (socket) => {
         }
     });
 
-    // 3. Enviar Asteroide Normal (com Cooldown e para Todos)
+    // 4. Enviar Asteroide Normal (com Cooldown e para Todos)
     socket.on('sendNormalEnemy', (roomId) => {
         const room = gameRooms[roomId];
         const player = room?.players[socket.id];
         if (!player || !player.isAlive) return;
 
-        // NOVO: Checagem de Cooldown
+        // Checagem de Cooldown
         const cooldown = getPlayerSendCooldown(player);
         if (Date.now() - player.lastSendTime < cooldown) {
             return; // Falha silenciosa (spam bloqueado)
         }
-        player.lastSendTime = Date.now();
         
         const custoInimigo = 50; 
         if (player.dinheiro >= custoInimigo) {
             player.dinheiro -= custoInimigo;
+            player.lastSendTime = Date.now(); // Reseta o cooldown SÓ se tiver sucesso
             
-            // ATUALIZADO: Envia para todos MENOS o remetente
+            // Envia para todos MENOS o remetente
             io.to(roomId).except(socket.id).emit('receiveEnemy', {
                 count: 1 + player.upgrades.enviarMais,
                 health: 1 + player.upgrades.asteroidVida,
@@ -168,24 +196,24 @@ io.on('connection', (socket) => {
         }
     });
 
-    // 4. Enviar Asteroide Atirador (com Cooldown e para Todos)
+    // 5. Enviar Asteroide Atirador (com Cooldown e para Todos)
     socket.on('sendShooterEnemy', (roomId) => {
         const room = gameRooms[roomId];
         const player = room?.players[socket.id];
         if (!player || !player.isAlive) return;
 
-        // NOVO: Checagem de Cooldown
+        // Checagem de Cooldown
         const cooldown = getPlayerSendCooldown(player);
         if (Date.now() - player.lastSendTime < cooldown) {
             return;
         }
-        player.lastSendTime = Date.now();
 
         const custoInimigo = 250; 
         if (player.dinheiro >= custoInimigo) {
             player.dinheiro -= custoInimigo;
-
-            // ATUALIZADO: Envia para todos MENOS o remetente
+            player.lastSendTime = Date.now(); // Reseta o cooldown SÓ se tiver sucesso
+            
+            // Envia para todos MENOS o remetente
             io.to(roomId).except(socket.id).emit('receiveEnemy', {
                 count: 1,
                 health: 5 * (1 + player.upgrades.asteroidVida),
@@ -199,7 +227,7 @@ io.on('connection', (socket) => {
         }
     });
 
-    // 5. Recompensa por Asteroide (Inimigo)
+    // 6. Recompensa por Asteroide (Inimigo)
     socket.on('asteroidKilled', (data) => {
         const room = gameRooms[data.roomId];
         const player = room?.players[socket.id];
@@ -213,19 +241,17 @@ io.on('connection', (socket) => {
         }
     });
 
-    // 6. NOVO: Recompensa por Asteroide (Neutro)
+    // 7. Recompensa por Asteroide (Neutro)
     socket.on('neutralAsteroidKilled', (roomId) => {
         const room = gameRooms[roomId];
         const player = room?.players[socket.id];
         if (!player) return;
-
-        const RECOMPENSA_NEUTRA = 10; // Valor fixo
+        const RECOMPENSA_NEUTRA = 10;
         player.dinheiro += RECOMPENSA_NEUTRA;
         io.to(roomId).emit('updateGameState', room);
     });
 
-
-    // 7. Jogador Tomou Dano (Atualizado para 10p)
+    // 8. Jogador Tomou Dano (Atualizado para 10p)
     socket.on('playerHit', (roomId) => {
          const room = gameRooms[roomId];
          const player = room?.players[socket.id];
@@ -234,10 +260,7 @@ io.on('connection', (socket) => {
              
              if (player.vidas <= 0) {
                  player.isAlive = false;
-                 // Informa a todos que este jogador foi eliminado
-                 io.to(roomId).emit('playerDied', { id: socket.id, name: `Jogador ${socket.id.substring(0,4)}` });
-                 
-                 // Checa se o jogo acabou
+                 io.to(roomId).emit('playerDied', { id: socket.id, nickname: player.nickname });
                  checkWinCondition(roomId);
              }
              
@@ -245,41 +268,44 @@ io.on('connection', (socket) => {
          }
     });
 
-    // 8. Mini-Mapa Snapshot (Incompatível com 10p, mas mantido para 1v1)
+    // 9. Mini-Mapa Snapshot (Mantido para 1v1)
     socket.on('sendSnapshot', (data) => {
         const { roomId, snapshot } = data;
         const room = gameRooms[roomId];
         if (!room) return;
-        
-        // Em 1v1, envia para o oponente. Em 1v10, esta UI não funciona.
-        const players = Object.keys(room.players);
+        const players = Object.values(room.players);
         if (players.length === 2) {
-            const opponentId = players.find(id => id !== socket.id);
-            if (opponentId) io.to(opponentId).emit('receiveSnapshot', snapshot);
+            const opponent = players.find(p => p.id !== socket.id);
+            if (opponent) io.to(opponent.id).emit('receiveSnapshot', snapshot);
         }
     });
 
-
-    // 9. Desconexão (Atualizado para 10p)
+    // 10. Desconexão (Atualizado para 10p e Host)
     socket.on('disconnect', () => {
         console.log(`Socket desconectado: ${socket.id}`);
         for (const roomId in gameRooms) {
             const room = gameRooms[roomId];
             if (room.players[socket.id]) {
+                const wasHost = room.players[socket.id].isHost;
                 delete room.players[socket.id];
                 
-                // Informa a todos que o jogador saiu
                 io.to(roomId).emit('playerLeft', { id: socket.id });
+
+                // Se o Host saiu, elege um novo Host (o jogador mais antigo)
+                if (wasHost && !room.gameRunning) { // Só se o jogo não começou
+                    const players = Object.values(room.players);
+                    if (players.length > 0) {
+                        players[0].isHost = true;
+                    }
+                }
                 
-                if (Object.keys(room.players).length < 2) {
-                    if (room.gameRunning) {
-                         // Se o jogo estava rodando, checa a vitória
-                         checkWinCondition(roomId);
-                    } else {
-                        // Se o jogo não estava rodando e a sala está vazia, limpa
-                        if (Object.keys(room.players).length === 0) {
-                             cleanupRoom(roomId);
-                        }
+                // Se o jogo estava rodando, checa a vitória
+                if (room.gameRunning) {
+                     checkWinCondition(roomId);
+                } else {
+                    // Se o jogo não estava rodando e a sala está vazia, limpa
+                    if (Object.keys(room.players).length === 0) {
+                         cleanupRoom(roomId);
                     }
                 }
                 io.to(roomId).emit('updateGameState', room);
@@ -296,13 +322,14 @@ function checkWinCondition(roomId) {
     
     const playersAlive = Object.values(room.players).filter(p => p.isAlive);
     
-    if (playersAlive.length === 1) {
-        // Temos um vencedor!
-        io.to(roomId).emit('gameOver', { winner: playersAlive[0].id });
-        cleanupRoom(roomId);
-    } else if (playersAlive.length === 0) {
-        // Empate? Limpa a sala
-        io.to(roomId).emit('gameOver', { winner: null }); // Empate
+    // Se o jogo estava rodando e resta 1 ou 0 jogadores
+    if (room.gameRunning && playersAlive.length <= 1) {
+        let winnerId = null;
+        if (playersAlive.length === 1) {
+             winnerId = playersAlive[0].id;
+        }
+        
+        io.to(roomId).emit('gameOver', { winner: winnerId });
         cleanupRoom(roomId);
     }
 }
@@ -324,7 +351,8 @@ function startIncomeLoop(roomId) {
     console.log(`Iniciando loop de renda para ${roomId}`);
     return setInterval(() => {
         const room = gameRooms[roomId];
-        if (!room) return;
+        if (!room) { clearInterval(this); return; }
+        
         let stateChanged = false;
         for (const playerId in room.players) {
             const player = room.players[playerId];
@@ -339,14 +367,13 @@ function startIncomeLoop(roomId) {
     }, 1000);
 }
 
-// NOVO: Loop de Spawn Neutro
+// Loop de Spawn Neutro
 function startNeutralSpawnLoop(roomId) {
     console.log(`Iniciando loop de spawn neutro para ${roomId}`);
     return setInterval(() => {
         const room = gameRooms[roomId];
-        if (!room) return;
+        if (!room) { clearInterval(this); return; }
         
-        // Emite para todos na sala
         io.to(roomId).emit('spawnNeutral');
         
     }, 10000); // A cada 10 segundos
