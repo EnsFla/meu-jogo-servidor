@@ -15,10 +15,8 @@ const io = new Server(server, {
 const PORT = process.env.PORT || 3000;
 
 // ----- Lógica Central do Jogo -----
-// Objeto para armazenar o estado de todas as salas de jogo ativas
-const gameRooms = {};
 
-// NOVO: Objeto central para definir custos e limites de upgrades
+// Objeto central para definir custos e limites de upgrades
 const UPGRADE_DEFINITIONS = {
     // Armas
     missil:         { maxLevel: 3, baseCost: 200 },
@@ -34,15 +32,19 @@ const UPGRADE_DEFINITIONS = {
     asteroidMaior:  { maxLevel: 5, baseCost: 150 },
     asteroidAtira:  { maxLevel: 2, baseCost: 500 },
     // Renda
-    income:         { maxLevel: 99, baseCost: 10 } // Seu upgrade de renda antigo
+    income:         { maxLevel: 99, baseCost: 10 } // Seu upgrade de renda
 };
 
-// MODIFICADO: Função para criar um estado de jogador padrão
+// Objeto para armazenar o estado de todas as salas de jogo ativas
+const gameRooms = {};
+
+// Função para criar um estado de jogador padrão
 function createPlayerState() {
     return {
         id: null,
-        vidas: 3,
+        vidas: 3, // Começa com 3 vidas
         dinheiro: 0,
+        // Todos os upgrades começam no nível 0, exceto a renda
         upgrades: {
             // Armas
             missil: 0,
@@ -71,16 +73,6 @@ function getUpgradeCost(upgradeKey, currentLevel) {
     return Math.floor(def.baseCost * Math.pow(1.15, currentLevel));
 }
 
-// Função para criar um estado de jogador padrão
-function createPlayerState() {
-    return {
-        id: null,
-        vidas: 3, // Começa com 3 vidas
-        dinheiro: 0,
-        income: 1, // Ganha 1 de dinheiro por segundo (exemplo)
-        // ...outros estados, como nave.x, nave.y se precisar sincronizar
-    };
-}
 
 io.on('connection', (socket) => {
     console.log(`Socket conectado: ${socket.id}`);
@@ -125,8 +117,7 @@ io.on('connection', (socket) => {
         io.to(roomId).emit('updateGameState', room);
     });
 
-    // 2. Jogador compra um upgrade de renda
-// SUBSTITUÍDO: 'buyIncomeUpgrade' agora é genérico
+    // 2. Jogador compra um upgrade (Lógica genérica)
     socket.on('buyUpgrade', (data) => {
         const { roomId, upgradeKey } = data;
         const room = gameRooms[roomId];
@@ -151,20 +142,13 @@ io.on('connection', (socket) => {
             if (upgradeKey === 'resistencia') {
                 player.vidas++; // Ganha 1 vida extra permanentemente
             }
-            if (upgradeKey === 'income') {
-                // 'income' é o único que não está no objeto 'upgrades',
-                // então ajustamos o nome (no UPGRADE_DEFINITIONS)
-                // para corresponder ao estado do jogador.
-                // Se você mover 'income' para dentro de 'upgrades',
-                // ajuste a função createPlayerState e o loop de renda.
-            }
             
             // Envia o estado atualizado para todos na sala
             io.to(roomId).emit('updateGameState', room);
         }
     });
 
-// MODIFICADO: 'sendEnemy' agora usa os upgrades do jogador
+    // 3. Jogador envia um inimigo (asteroide)
     socket.on('sendEnemy', (roomId) => {
         const room = gameRooms[roomId];
         const player = room?.players[socket.id];
@@ -181,7 +165,7 @@ io.on('connection', (socket) => {
             const opponentId = Object.keys(room.players).find(id => id !== socket.id);
 
             if (opponentId) {
-                // NOVO: Envia um objeto de dados com os upgrades do *atacante*
+                // Envia um objeto de dados com os upgrades do *atacante*
                 io.to(opponentId).emit('receiveEnemy', {
                     count: 1 + player.upgrades.enviarMais,
                     health: 1 + player.upgrades.asteroidVida,
@@ -223,11 +207,17 @@ io.on('connection', (socket) => {
         for (const roomId in gameRooms) {
             const room = gameRooms[roomId];
             if (room.players[socket.id]) {
+                const opponentId = Object.keys(room.players).find(id => id !== socket.id);
                 delete room.players[socket.id];
+                
                 // Informa ao outro jogador que o oponente saiu
-                io.to(roomId).emit('opponentLeft');
+                if (opponentId) {
+                    io.to(opponentId).emit('opponentLeft');
+                }
+                
                 // Limpa a sala
                 delete gameRooms[roomId];
+                console.log(`Sala ${roomId} limpa.`);
                 break;
             }
         }
@@ -253,6 +243,7 @@ function startIncomeLoop(roomId) {
         }
 
         if (stateChanged) {
+            // Emite apenas o objeto 'players' para economizar banda
             io.to(roomId).emit('updateGameState', room.players);
         }
 
