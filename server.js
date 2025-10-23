@@ -1,4 +1,4 @@
-// server.js - O CÉREBRO DO SEU JOGO MULTIPLAYER (v3)
+// server.js - O CÉREBRO DO SEU JOGO MULTIPLAYER (v4)
 const express = require('express');
 const http = require('http');
 const { Server } = require("socket.io");
@@ -31,8 +31,8 @@ const UPGRADE_DEFINITIONS = {
     asteroidMaior:  { maxLevel: 5, baseCost: 150 },
     // Renda
     income:         { maxLevel: 99, baseCost: 10 },
-    // NOVO: Recompensa
-    bounty:         { maxLevel: 5, baseCost: 300 } // +10% por nível
+    // NOVO: Recompensa com custo progressivo fixo
+    bounty:         { maxLevel: 5, baseCost: [300, 500, 800, 1300, 2100] } // 5 níveis
 };
 
 const gameRooms = {};
@@ -53,14 +53,23 @@ function createPlayerState() {
             asteroidVida: 0,
             asteroidMaior: 0,
             income: 1,
-            bounty: 0 // NOVO
+            bounty: 0
         }
     };
 }
 
+// ATUALIZADO: getUpgradeCost agora lida com custos em array
 function getUpgradeCost(upgradeKey, currentLevel) {
     if (!UPGRADE_DEFINITIONS[upgradeKey]) return Infinity;
+    
     const def = UPGRADE_DEFINITIONS[upgradeKey];
+    
+    // Se baseCost for um array, use-o
+    if (Array.isArray(def.baseCost)) {
+        return def.baseCost[currentLevel] || Infinity; // Retorna o custo do nível atual ou Infinito se maxed
+    }
+    
+    // Senão, use a fórmula exponencial
     return Math.floor(def.baseCost * Math.pow(1.15, currentLevel));
 }
 
@@ -105,7 +114,9 @@ io.on('connection', (socket) => {
         const currentLevel = player.upgrades[upgradeKey];
         if (currentLevel >= def.maxLevel) return;
 
+        // Usa a nova função getUpgradeCost
         const cost = getUpgradeCost(upgradeKey, currentLevel);
+        
         if (player.dinheiro >= cost) {
             player.dinheiro -= cost;
             player.upgrades[upgradeKey]++;
@@ -133,7 +144,7 @@ io.on('connection', (socket) => {
                     size: 1 + player.upgrades.asteroidMaior,
                     shoots: false,
                     shooterLevel: 0,
-                    bountyValue: Math.floor(custoInimigo * 0.75) // NOVO: 75% do custo
+                    bountyValue: Math.floor(custoInimigo * 0.75) // 75% do custo
                 }); 
             }
             io.to(roomId).emit('updateGameState', room);
@@ -158,27 +169,25 @@ io.on('connection', (socket) => {
                     size: 1 + player.upgrades.asteroidMaior,
                     shoots: true,
                     shooterLevel: 2,
-                    bountyValue: Math.floor(custoInimigo * 0.75) // NOVO: 75% do custo
+                    bountyValue: Math.floor(custoInimigo * 0.75) // 75% do custo
                 });
             }
             io.to(roomId).emit('updateGameState', room);
         }
     });
 
-    // 5. NOVO: Jogador reporta asteroide destruído
+    // 5. Jogador reporta asteroide destruído
     socket.on('asteroidKilled', (data) => {
         const room = gameRooms[data.roomId];
         const player = room?.players[socket.id];
         if (!player) return;
 
         const baseBounty = data.bountyValue || 0;
-        // Calcula bônus: +10% por nível de upgrade
-        const bonus = 1 + (player.upgrades.bounty * 0.1); 
+        const bonus = 1 + (player.upgrades.bounty * 0.1); // +10% por nível
         const totalBounty = Math.floor(baseBounty * bonus);
         
         if (totalBounty > 0) {
             player.dinheiro += totalBounty;
-            // Envia atualização de estado para que o dinheiro apareça
             io.to(data.roomId).emit('updateGameState', room);
         }
     });
@@ -203,13 +212,9 @@ io.on('connection', (socket) => {
         const { roomId, snapshot } = data;
         const room = gameRooms[roomId];
         if (!room) return;
-        
         const opponentId = Object.keys(room.players).find(id => id !== socket.id);
-        if (opponentId) {
-            io.to(opponentId).emit('receiveSnapshot', snapshot);
-        }
+        if (opponentId) io.to(opponentId).emit('receiveSnapshot', snapshot);
     });
-
 
     // 8. Desconexão
     socket.on('disconnect', () => {
