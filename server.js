@@ -18,6 +18,59 @@ const PORT = process.env.PORT || 3000;
 // Objeto para armazenar o estado de todas as salas de jogo ativas
 const gameRooms = {};
 
+// NOVO: Objeto central para definir custos e limites de upgrades
+const UPGRADE_DEFINITIONS = {
+    // Armas
+    missil:         { maxLevel: 3, baseCost: 200 },
+    tiroDuplo:      { maxLevel: 1, baseCost: 150 },
+    laser:          { maxLevel: 5, baseCost: 300 },
+    // Nave
+    velocidade:     { maxLevel: 3, baseCost: 50 },
+    resistencia:    { maxLevel: 3, baseCost: 250 }, // +1 vida por nível
+    escudo:         { maxLevel: 5, baseCost: 100 },
+    // Asteroides (Ataque)
+    enviarMais:     { maxLevel: 10, baseCost: 75 },
+    asteroidVida:   { maxLevel: 10, baseCost: 100 },
+    asteroidMaior:  { maxLevel: 5, baseCost: 150 },
+    asteroidAtira:  { maxLevel: 2, baseCost: 500 },
+    // Renda
+    income:         { maxLevel: 99, baseCost: 10 } // Seu upgrade de renda antigo
+};
+
+// MODIFICADO: Função para criar um estado de jogador padrão
+function createPlayerState() {
+    return {
+        id: null,
+        vidas: 3,
+        dinheiro: 0,
+        upgrades: {
+            // Armas
+            missil: 0,
+            tiroDuplo: 0,
+            laser: 0,
+            // Nave
+            velocidade: 0,
+            resistencia: 0,
+            escudo: 0,
+            // Asteroides (Ataque)
+            enviarMais: 0,
+            asteroidVida: 0,
+            asteroidMaior: 0,
+            asteroidAtira: 0,
+            // Renda
+            income: 1 // Começa com 1 de renda
+        }
+    };
+}
+
+// Função para calcular o custo (exponencial)
+function getUpgradeCost(upgradeKey, currentLevel) {
+    if (!UPGRADE_DEFINITIONS[upgradeKey]) return Infinity;
+    const def = UPGRADE_DEFINITIONS[upgradeKey];
+    // Custo = base * 1.15^level (exemplo de custo exponencial)
+    return Math.floor(def.baseCost * Math.pow(1.15, currentLevel));
+}
+
 // Função para criar um estado de jogador padrão
 function createPlayerState() {
     return {
@@ -73,37 +126,69 @@ io.on('connection', (socket) => {
     });
 
     // 2. Jogador compra um upgrade de renda
-    socket.on('buyIncomeUpgrade', (roomId) => {
+// SUBSTITUÍDO: 'buyIncomeUpgrade' agora é genérico
+    socket.on('buyUpgrade', (data) => {
+        const { roomId, upgradeKey } = data;
         const room = gameRooms[roomId];
         const player = room?.players[socket.id];
+        
+        if (!player || !UPGRADE_DEFINITIONS[upgradeKey]) return; // Checagem de segurança
 
-        if (player) {
-            const custoUpgrade = Math.floor(10 * Math.pow(1.1, player.income)); // Custo exponencial
-            if (player.dinheiro >= custoUpgrade) {
-                player.dinheiro -= custoUpgrade;
-                player.income += 1;
-                
-                // Envia o estado atualizado para todos na sala
-                io.to(roomId).emit('updateGameState', room);
+        const def = UPGRADE_DEFINITIONS[upgradeKey];
+        const currentLevel = player.upgrades[upgradeKey];
+
+        if (currentLevel >= def.maxLevel) {
+            return; // Já está no nível máximo
+        }
+
+        const cost = getUpgradeCost(upgradeKey, currentLevel);
+
+        if (player.dinheiro >= cost) {
+            player.dinheiro -= cost;
+            player.upgrades[upgradeKey]++;
+
+            // Lógica especial para upgrades
+            if (upgradeKey === 'resistencia') {
+                player.vidas++; // Ganha 1 vida extra permanentemente
             }
+            if (upgradeKey === 'income') {
+                // 'income' é o único que não está no objeto 'upgrades',
+                // então ajustamos o nome (no UPGRADE_DEFINITIONS)
+                // para corresponder ao estado do jogador.
+                // Se você mover 'income' para dentro de 'upgrades',
+                // ajuste a função createPlayerState e o loop de renda.
+            }
+            
+            // Envia o estado atualizado para todos na sala
+            io.to(roomId).emit('updateGameState', room);
         }
     });
 
-    // 3. Jogador envia um inimigo (asteroide)
+// MODIFICADO: 'sendEnemy' agora usa os upgrades do jogador
     socket.on('sendEnemy', (roomId) => {
         const room = gameRooms[roomId];
         const player = room?.players[socket.id];
-        const custoInimigo = 50; // Custo fixo para enviar um inimigo
+        
+        if (!player) return;
 
-        if (player && player.dinheiro >= custoInimigo) {
+        // Custo para enviar *um* conjunto de asteroides
+        const custoInimigo = 50; 
+
+        if (player.dinheiro >= custoInimigo) {
             player.dinheiro -= custoInimigo;
 
             // Encontra o ID do oponente
             const opponentId = Object.keys(room.players).find(id => id !== socket.id);
 
             if (opponentId) {
-                // Envia uma mensagem APENAS para o oponente
-                io.to(opponentId).emit('receiveEnemy'); 
+                // NOVO: Envia um objeto de dados com os upgrades do *atacante*
+                io.to(opponentId).emit('receiveEnemy', {
+                    count: 1 + player.upgrades.enviarMais,
+                    health: 1 + player.upgrades.asteroidVida,
+                    size: 1 + player.upgrades.asteroidMaior,
+                    shoots: player.upgrades.asteroidAtira > 0,
+                    shooterLevel: player.upgrades.asteroidAtira
+                }); 
             }
             
             // Atualiza o estado para todos
@@ -162,12 +247,12 @@ function startIncomeLoop(roomId) {
 
         let stateChanged = false;
         for (const playerId in room.players) {
-            room.players[playerId].dinheiro += room.players[playerId].income;
+            const player = room.players[playerId];
+            player.dinheiro += player.upgrades.income; // Lê o nível de renda
             stateChanged = true;
         }
 
         if (stateChanged) {
-            // Emite apenas o objeto 'players' para economizar banda
             io.to(roomId).emit('updateGameState', room.players);
         }
 
