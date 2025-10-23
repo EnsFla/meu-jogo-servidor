@@ -1,4 +1,4 @@
-// server.js - O CÉREBRO DO SEU JOGO MULTIPLAYER (v4)
+// server.js - O CÉREBRO DO SEU JOGO MULTIPLAYER (v5 - Upgrades Exclusivos)
 const express = require('express');
 const http = require('http');
 const { Server } = require("socket.io");
@@ -21,7 +21,7 @@ const UPGRADE_DEFINITIONS = {
     missil:         { maxLevel: 3, baseCost: 200 },
     tiroDuplo:      { maxLevel: 1, baseCost: 150 },
     laser:          { maxLevel: 5, baseCost: 300 },
-    homingMissile:  { maxLevel: 1, baseCost: 1000 }, // NOVO
+    homingMissile:  { maxLevel: 1, baseCost: 1000 },
     // Nave
     velocidade:     { maxLevel: 3, baseCost: 50 },
     resistencia:    { maxLevel: 3, baseCost: 250 },
@@ -30,50 +30,52 @@ const UPGRADE_DEFINITIONS = {
     enviarMais:     { maxLevel: 10, baseCost: 75 },
     asteroidVida:   { maxLevel: 10, baseCost: 100 },
     asteroidMaior:  { maxLevel: 5, baseCost: 150 },
-    sendCooldown:   { maxLevel: 5, baseCost: 200 }, // NOVO
+    sendCooldown:   { maxLevel: 5, baseCost: 200 },
     // Renda
     income:         { maxLevel: 99, baseCost: 10 },
-    // NOVO: Recompensa com custo progressivo fixo
-    bounty:         { maxLevel: 5, baseCost: [300, 500, 800, 1300, 2100] } // 5 níveis
+    bounty:         { maxLevel: 5, baseCost: [300, 500, 800, 1300, 2100] },
+    
+    // NOVO: Upgrades Exclusivos
+    ultimate_cluster: { maxLevel: 1, baseCost: 2500, dependency: 'tiroDuplo' },
+    ultimate_laser:   { maxLevel: 1, baseCost: 2500, dependency: 'laser' },
+    ultimate_barrage: { maxLevel: 1, baseCost: 2500, dependency: 'missil' },
+    ultimate_swarm:   { maxLevel: 1, baseCost: 2500, dependency: 'homingMissile' }
 };
-
-const gameRooms = {};
 
 function createPlayerState() {
     return {
         id: null,
         vidas: 3,
         dinheiro: 0,
+        hasUltimate: false, // NOVO: Trava para upgrade exclusivo
         upgrades: {
             missil: 0,
             tiroDuplo: 0,
             laser: 0,
-            homingMissile: 0, // NOVO
+            homingMissile: 0,
             velocidade: 0,
             resistencia: 0,
             escudo: 0,
             enviarMais: 0,
             asteroidVida: 0,
             asteroidMaior: 0,
-            sendCooldown: 0, // NOVO
+            sendCooldown: 0,
             income: 1,
-            bounty: 0
+            bounty: 0,
+            ultimate_cluster: 0, // NOVO
+            ultimate_laser: 0,   // NOVO
+            ultimate_barrage: 0, // NOVO
+            ultimate_swarm: 0    // NOVO
         }
     };
 }
 
-// ATUALIZADO: getUpgradeCost agora lida com custos em array
 function getUpgradeCost(upgradeKey, currentLevel) {
     if (!UPGRADE_DEFINITIONS[upgradeKey]) return Infinity;
-    
     const def = UPGRADE_DEFINITIONS[upgradeKey];
-    
-    // Se baseCost for um array, use-o
     if (Array.isArray(def.baseCost)) {
-        return def.baseCost[currentLevel] || Infinity; // Retorna o custo do nível atual ou Infinito se maxed
+        return def.baseCost[currentLevel] || Infinity;
     }
-    
-    // Senão, use a fórmula exponencial
     return Math.floor(def.baseCost * Math.pow(1.15, currentLevel));
 }
 
@@ -112,7 +114,7 @@ io.on('connection', (socket) => {
         io.to(roomId).emit('updateGameState', room.players);
     });
 
-    // 2. Comprar Upgrade
+    // 2. Comprar Upgrade (ATUALIZADO)
     socket.on('buyUpgrade', (data) => {
         const { roomId, upgradeKey } = data;
         const room = gameRooms[roomId];
@@ -126,18 +128,35 @@ io.on('connection', (socket) => {
         if (currentLevel >= def.maxLevel) return; // Já está no máximo
 
         const cost = getUpgradeCost(upgradeKey, currentLevel);
+        if (player.dinheiro < cost) return;
 
-        if (player.dinheiro >= cost) {
+        // --- Lógica de Upgrade Exclusivo ---
+        if (upgradeKey.startsWith('ultimate_')) {
+            if (player.hasUltimate) return; // Já possui um exclusivo
+
+            // Verifica dependência
+            const dependencyKey = def.dependency;
+            const dependencyDef = UPGRADE_DEFINITIONS[dependencyKey];
+            if (player.upgrades[dependencyKey] < dependencyDef.maxLevel) {
+                return; // Não cumpriu o requisito
+            }
+            
+            // Compra o upgrade
+            player.dinheiro -= cost;
+            player.upgrades[upgradeKey]++;
+            player.hasUltimate = true; // Trava!
+            
+        } else {
+            // --- Lógica de Upgrade Normal ---
             player.dinheiro -= cost;
             player.upgrades[upgradeKey]++;
             
-            // Lógica especial para upgrades
             if (upgradeKey === 'resistencia') {
-                player.vidas++; // Ganha 1 vida ao comprar
+                player.vidas++;
             }
-
-            io.to(roomId).emit('updateGameState', room.players);
         }
+        
+        io.to(roomId).emit('updateGameState', room.players);
     });
 
     // 3. Jogador foi Atingido
@@ -148,7 +167,6 @@ io.on('connection', (socket) => {
         if (player && room.gameRunning) {
             player.vidas--;
             if (player.vidas <= 0) {
-                // Fim de jogo
                 const opponentId = Object.keys(room.players).find(id => id !== socket.id);
                 io.to(roomId).emit('gameOver', { winner: opponentId, loser: socket.id });
                 room.gameRunning = false;
@@ -166,16 +184,33 @@ io.on('connection', (socket) => {
         const player = room?.players[socket.id];
         
         if (player) {
-            // Calcula o bônus de bounty (10% por nível)
             const bountyMultiplier = 1.0 + (player.upgrades.bounty * 0.1);
             const totalBounty = Math.floor(bountyValue * bountyMultiplier);
             
             player.dinheiro += totalBounty;
-            io.to(roomId).emit('updateGameState', room.players);
+            // ATENÇÃO: Emitir 'updateGameState' aqui pode causar lag de rede.
+            // O 'updateGameState' do loop de renda (1s) ou o do 'buyUpgrade'
+            // geralmente são suficientes. Vamos remover este para otimizar.
+            // io.to(roomId).emit('updateGameState', room.players);
+        }
+    });
+    
+    // 5. Asteroide Neutro Destruído
+    socket.on('neutralAsteroidDestroyed', (roomId) => {
+        const room = gameRooms[roomId];
+        const player = room?.players[socket.id];
+        if (player) {
+            player.dinheiro += 25; // Recompensa fixa
+            // Mesmo caso do 'asteroidDestroyed', não vamos floodar o update.
+            // io.to(roomId).emit('updateGameState', room.players);
+            
+            // Em vez disso, vamos emitir um evento leve SÓ para o jogador
+            socket.emit('gainMoney', 25);
         }
     });
 
-    // 5. Enviar Inimigo Normal
+
+    // 6. Enviar Inimigo Normal
     socket.on('sendNormalEnemy', (roomId) => {
         const CUSTO = 50;
         const room = gameRooms[roomId];
@@ -191,14 +226,14 @@ io.on('connection', (socket) => {
                 health: 10 + (player.upgrades.asteroidVida * 5),
                 size: 1 + player.upgrades.asteroidMaior,
                 shoots: false,
-                bountyValue: 10 // Recompensa base
+                bountyValue: 10
             };
             io.to(opponentId).emit('receiveEnemy', enemyData);
             io.to(roomId).emit('updateGameState', room.players);
         }
     });
 
-    // 6. Enviar Inimigo Atirador
+    // 7. Enviar Inimigo Atirador
     socket.on('sendShooterEnemy', (roomId) => {
         const CUSTO = 250;
         const room = gameRooms[roomId];
@@ -210,24 +245,14 @@ io.on('connection', (socket) => {
             player.dinheiro -= CUSTO;
             
             const enemyData = {
-                count: 1, // Atiradores não são afetados por 'enviarMais'
+                count: 1, 
                 health: 50 + (player.upgrades.asteroidVida * 10),
                 size: 1 + player.upgrades.asteroidMaior,
                 shoots: true,
-                shooterLevel: player.upgrades.asteroidVida, // Dano do tiro escala com a vida
-                bountyValue: 50 // Recompensa base
+                shooterLevel: player.upgrades.asteroidVida,
+                bountyValue: 50
             };
             io.to(opponentId).emit('receiveEnemy', enemyData);
-            io.to(roomId).emit('updateGameState', room.players);
-        }
-    });
-
-    // 7. NOVO: Asteroide Neutro Destruído
-    socket.on('neutralAsteroidDestroyed', (roomId) => {
-        const room = gameRooms[roomId];
-        const player = room?.players[socket.id];
-        if (player) {
-            player.dinheiro += 25; // Recompensa fixa
             io.to(roomId).emit('updateGameState', room.players);
         }
     });
@@ -255,7 +280,6 @@ io.on('connection', (socket) => {
                 if (opponentId) {
                     io.to(opponentId).emit('opponentLeft');
                 }
-                // Limpa a sala se o jogo acabou ou o oponente saiu
                 delete gameRooms[roomId];
                 console.log(`Sala ${roomId} limpa.`);
                 break;
@@ -285,7 +309,7 @@ function startIncomeLoop(roomId) {
         if (stateChanged) {
             io.to(roomId).emit('updateGameState', room.players);
         }
-    }, 1000); // Renda a cada segundo
+    }, 1000); 
 }
 
 server.listen(PORT, () => {
