@@ -129,7 +129,7 @@ const RISKY_INVEST_LOSS_CAP = 200;
 
 function createPlayerState() {
     return {
-        id: null, vidas: 3, dinheiro: 500, 
+        id: null, vidas: 3, dinheiro: 2000, 
         hasUltimate: false, canHaveSecondUltimate: false, ultimateCount: 0,
         bankTimer: 10, riskyInvestTimer: RISKY_INVEST_TIMER,
         // Cooldowns
