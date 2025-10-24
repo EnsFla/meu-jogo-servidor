@@ -26,6 +26,15 @@ const io = new Server(server, {
     }
 });
 
+function keepAlive() {
+    fetch(SERVER_URL + '/keep-alive')
+        .then(res => res.json())
+        .then(data => console.log('Keep-alive ping:', data.status))
+        .catch(err => console.warn('Keep-alive ping falhou:', err));
+}
+
+setInterval(keepAlive, 300000);
+
 const PORT = process.env.PORT || 3000;
 
 // ----- Lógica Central do Jogo -----
@@ -129,7 +138,7 @@ const RISKY_INVEST_LOSS_CAP = 200;
 
 function createPlayerState() {
     return {
-        id: null, vidas: 3, dinheiro: 2000, 
+        id: null, vidas: 3, dinheiro: 20000, 
         hasUltimate: false, canHaveSecondUltimate: false, ultimateCount: 0,
         bankTimer: 10, riskyInvestTimer: RISKY_INVEST_TIMER,
         // Cooldowns
