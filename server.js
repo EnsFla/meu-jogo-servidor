@@ -1,4 +1,4 @@
-// server.js - O CÉREBRO DO SEU JOGO MULTIPLAYER (v5 - Upgrades Exclusivos)
+// server.js - O CÉREBRO DO SEU JOGO MULTIPLAYER (v5.1 - Correção de Escopo)
 const express = require('express');
 const http = require('http');
 const { Server } = require("socket.io");
@@ -35,7 +35,7 @@ const UPGRADE_DEFINITIONS = {
     income:         { maxLevel: 99, baseCost: 10 },
     bounty:         { maxLevel: 5, baseCost: [300, 500, 800, 1300, 2100] },
     
-    // NOVO: Upgrades Exclusivos
+    // Upgrades Exclusivos
     ultimate_cluster: { maxLevel: 1, baseCost: 2500, dependency: 'tiroDuplo' },
     ultimate_laser:   { maxLevel: 1, baseCost: 2500, dependency: 'laser' },
     ultimate_barrage: { maxLevel: 1, baseCost: 2500, dependency: 'missil' },
@@ -47,7 +47,7 @@ function createPlayerState() {
         id: null,
         vidas: 3,
         dinheiro: 0,
-        hasUltimate: false, // NOVO: Trava para upgrade exclusivo
+        hasUltimate: false, // Trava para upgrade exclusivo
         upgrades: {
             missil: 0,
             tiroDuplo: 0,
@@ -62,10 +62,10 @@ function createPlayerState() {
             sendCooldown: 0,
             income: 1,
             bounty: 0,
-            ultimate_cluster: 0, // NOVO
-            ultimate_laser: 0,   // NOVO
-            ultimate_barrage: 0, // NOVO
-            ultimate_swarm: 0    // NOVO
+            ultimate_cluster: 0,
+            ultimate_laser: 0,
+            ultimate_barrage: 0,
+            ultimate_swarm: 0
         }
     };
 }
@@ -79,6 +79,11 @@ function getUpgradeCost(upgradeKey, currentLevel) {
     return Math.floor(def.baseCost * Math.pow(1.15, currentLevel));
 }
 
+// ===================================================================
+// *** LINHA CORRIGIDA ***
+// Esta linha estava faltando, causando o crash na desconexão.
+const gameRooms = {};
+// ===================================================================
 
 io.on('connection', (socket) => {
     console.log(`Socket conectado: ${socket.id}`);
@@ -114,7 +119,7 @@ io.on('connection', (socket) => {
         io.to(roomId).emit('updateGameState', room.players);
     });
 
-    // 2. Comprar Upgrade (ATUALIZADO)
+    // 2. Comprar Upgrade
     socket.on('buyUpgrade', (data) => {
         const { roomId, upgradeKey } = data;
         const room = gameRooms[roomId];
@@ -125,26 +130,24 @@ io.on('connection', (socket) => {
         const def = UPGRADE_DEFINITIONS[upgradeKey];
         const currentLevel = player.upgrades[upgradeKey];
 
-        if (currentLevel >= def.maxLevel) return; // Já está no máximo
+        if (currentLevel >= def.maxLevel) return; 
 
         const cost = getUpgradeCost(upgradeKey, currentLevel);
         if (player.dinheiro < cost) return;
 
         // --- Lógica de Upgrade Exclusivo ---
         if (upgradeKey.startsWith('ultimate_')) {
-            if (player.hasUltimate) return; // Já possui um exclusivo
+            if (player.hasUltimate) return; 
 
-            // Verifica dependência
             const dependencyKey = def.dependency;
             const dependencyDef = UPGRADE_DEFINITIONS[dependencyKey];
             if (player.upgrades[dependencyKey] < dependencyDef.maxLevel) {
-                return; // Não cumpriu o requisito
+                return; 
             }
             
-            // Compra o upgrade
             player.dinheiro -= cost;
             player.upgrades[upgradeKey]++;
-            player.hasUltimate = true; // Trava!
+            player.hasUltimate = true; 
             
         } else {
             // --- Lógica de Upgrade Normal ---
@@ -164,7 +167,7 @@ io.on('connection', (socket) => {
         const room = gameRooms[roomId];
         const player = room?.players[socket.id];
         
-        if (player && room.gameRunning) {
+        if (player && room?.gameRunning) { // Adicionada verificação de room
             player.vidas--;
             if (player.vidas <= 0) {
                 const opponentId = Object.keys(room.players).find(id => id !== socket.id);
@@ -188,10 +191,6 @@ io.on('connection', (socket) => {
             const totalBounty = Math.floor(bountyValue * bountyMultiplier);
             
             player.dinheiro += totalBounty;
-            // ATENÇÃO: Emitir 'updateGameState' aqui pode causar lag de rede.
-            // O 'updateGameState' do loop de renda (1s) ou o do 'buyUpgrade'
-            // geralmente são suficientes. Vamos remover este para otimizar.
-            // io.to(roomId).emit('updateGameState', room.players);
         }
     });
     
@@ -200,11 +199,7 @@ io.on('connection', (socket) => {
         const room = gameRooms[roomId];
         const player = room?.players[socket.id];
         if (player) {
-            player.dinheiro += 25; // Recompensa fixa
-            // Mesmo caso do 'asteroidDestroyed', não vamos floodar o update.
-            // io.to(roomId).emit('updateGameState', room.players);
-            
-            // Em vez disso, vamos emitir um evento leve SÓ para o jogador
+            player.dinheiro += 25; 
             socket.emit('gainMoney', 25);
         }
     });
@@ -272,6 +267,7 @@ io.on('connection', (socket) => {
     // 9. Desconexão
     socket.on('disconnect', () => {
         console.log(`Socket desconectado: ${socket.id}`);
+        // AQUI ESTAVA O ERRO (linha ~275)
         for (const roomId in gameRooms) {
             const room = gameRooms[roomId];
             if (room.players[socket.id]) {
