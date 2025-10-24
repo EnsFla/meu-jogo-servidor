@@ -1,4 +1,4 @@
-// server.js - O CÉREBRO DO SEU JOGO MULTIPLAYER (v5.4 - Novos Upgrades: Piercing, Bank, Bomber)
+// server.js - O CÉREBRO DO SEU JOGO MULTIPLAYER (v5.5 - Mais Novos Upgrades!)
 const express = require('express');
 const http = require('http');
 const { Server } = require("socket.io");
@@ -36,28 +36,37 @@ const UPGRADE_DEFINITIONS = {
     tiroDuplo:      { maxLevel: 1, baseCost: 150 },
     laser:          { maxLevel: 5, baseCost: 300 },
     homingMissile:  { maxLevel: 1, baseCost: 1000 },
-    piercingShots:  { maxLevel: 1, baseCost: 750 }, // NOVO
+    piercingShots:  { maxLevel: 1, baseCost: 750 },
+    cryoAmmo:       { maxLevel: 1, baseCost: 1200 }, // NOVO
     // Nave
     velocidade:     { maxLevel: 3, baseCost: 50 },
     resistencia:    { maxLevel: 3, baseCost: 250 },
     escudo:         { maxLevel: 5, baseCost: 100 },
-    // Asteroides (Ataque)
+    matterConverter:{ maxLevel: 1, baseCost: 600 }, // NOVO (Habilidade)
+    // Ataque
     enviarMais:     { maxLevel: 10, baseCost: 75 },
     asteroidVida:   { maxLevel: 10, baseCost: 100 },
     asteroidMaior:  { maxLevel: 5, baseCost: 150 },
     sendCooldown:   { maxLevel: 5, baseCost: 200 },
-    bomberAsteroid: { maxLevel: 1, baseCost: 400 }, // NOVO (Custo para *desbloquear*)
+    bomberAsteroid: { maxLevel: 1, baseCost: 400 },
+    incomeInhibitor:{ maxLevel: 1, baseCost: 350 }, // NOVO (Unidade)
     // Renda
     income:         { maxLevel: 99, baseCost: 10 },
     bounty:         { maxLevel: 5, baseCost: [300, 500, 800, 1300, 2100] },
-    galacticBank:   { maxLevel: 5, baseCost: 300 }, // NOVO
+    galacticBank:   { maxLevel: 5, baseCost: 300 },
     
     // Upgrades Exclusivos
     ultimate_cluster: { maxLevel: 1, baseCost: 2500, dependency: 'tiroDuplo' },
     ultimate_laser:   { maxLevel: 1, baseCost: 2500, dependency: 'laser' },
     ultimate_barrage: { maxLevel: 1, baseCost: 2500, dependency: 'missil' },
-    ultimate_swarm:   { maxLevel: 1, baseCost: 2500, dependency: 'homingMissile' }
+    ultimate_swarm:   { maxLevel: 1, baseCost: 2500, dependency: 'homingMissile' },
+    ultimate_shield:  { maxLevel: 1, baseCost: 2000, dependency: 'escudo' } // NOVO
 };
+
+const MATTER_CONVERTER_COOLDOWN = 20;
+const SHIELD_OVERLOAD_COOLDOWN = 15;
+const INCOME_DEBUFF_DURATION = 10;
+const INCOME_DEBUFF_MULTIPLIER = 0.5; // Reduz para 50%
 
 function createPlayerState() {
     return {
@@ -65,28 +74,22 @@ function createPlayerState() {
         vidas: 3,
         dinheiro: 1000000,
         hasUltimate: false,
-        bankTimer: 10, // NOVO: Timer para juros
+        bankTimer: 10,
+        // NOVO: Cooldowns e Debuffs
+        converterCooldown: 0,
+        shieldOverloadCooldown: 0,
+        incomeDebuffDuration: 0,
         upgrades: {
-            missil: 0,
-            tiroDuplo: 0,
-            laser: 0,
-            homingMissile: 0,
-            piercingShots: 0, // NOVO
-            velocidade: 0,
-            resistencia: 0,
-            escudo: 0,
-            enviarMais: 0,
-            asteroidVida: 0,
-            asteroidMaior: 0,
-            sendCooldown: 0,
-            bomberAsteroid: 0, // NOVO
-            income: 1,
-            bounty: 0,
-            galacticBank: 0, // NOVO
-            ultimate_cluster: 0,
-            ultimate_laser: 0,
-            ultimate_barrage: 0,
-            ultimate_swarm: 0
+            // Armas
+            missil: 0, tiroDuplo: 0, laser: 0, homingMissile: 0, piercingShots: 0, cryoAmmo: 0,
+            // Nave
+            velocidade: 0, resistencia: 0, escudo: 0, matterConverter: 0,
+            // Ataque
+            enviarMais: 0, asteroidVida: 0, asteroidMaior: 0, sendCooldown: 0, bomberAsteroid: 0, incomeInhibitor: 0,
+            // Renda
+            income: 1, bounty: 0, galacticBank: 0,
+            // Exclusivos
+            ultimate_cluster: 0, ultimate_laser: 0, ultimate_barrage: 0, ultimate_swarm: 0, ultimate_shield: 0
         }
     };
 }
@@ -97,7 +100,6 @@ function getUpgradeCost(upgradeKey, currentLevel) {
     if (Array.isArray(def.baseCost)) {
         return def.baseCost[currentLevel] || Infinity;
     }
-    // Custo progressivo para o Banco
     if (upgradeKey === 'galacticBank') {
         return Math.floor(def.baseCost * Math.pow(1.5, currentLevel));
     }
@@ -117,7 +119,9 @@ io.on('connection', (socket) => {
         if (!gameRooms[roomId]) {
             gameRooms[roomId] = {
                 players: {},
-                gameRunning: false
+                // NOVO: Guarda estado compartilhado da sala
+                neutralAsteroids: {}, // Para o Matter Converter saber quais absorver
+                inhibitorTimers: {} // Guarda IDs dos inibidores e seus timers
             };
         }
 
@@ -130,6 +134,11 @@ io.on('connection', (socket) => {
             if (Object.keys(room.players).length === 2) {
                 console.log(`Sala ${roomId} está cheia. Começando o jogo.`);
                 room.gameRunning = true;
+                // Inicializa timers dos inibidores (vazio)
+                const playerIds = Object.keys(room.players);
+                room.inhibitorTimers[playerIds[0]] = {};
+                room.inhibitorTimers[playerIds[1]] = {};
+                
                 io.to(roomId).emit('gameStart', room);
                 startIncomeLoop(roomId);
             }
@@ -194,7 +203,7 @@ io.on('connection', (socket) => {
                 const opponentId = Object.keys(room.players).find(id => id !== socket.id);
                 io.to(roomId).emit('gameOver', { winner: opponentId, loser: socket.id });
                 room.gameRunning = false;
-                delete gameRooms[roomId];
+                delete gameRooms[roomId]; // Limpa a sala
             } else {
                 io.to(roomId).emit('updateGameState', room.players);
             }
@@ -215,13 +224,90 @@ io.on('connection', (socket) => {
         }
     });
     
-    // 5. Asteroide Neutro Destruído
-    socket.on('neutralAsteroidDestroyed', (roomId) => {
+    // 5. Asteroide Neutro Destruído / Convertido
+    // ATUALIZADO: Recebe o ID do asteroide neutro
+    socket.on('neutralAsteroidDestroyed', (data) => {
+        const { roomId, asteroidId, converted } = data; // 'converted' indica se foi pelo Matter Converter
         const room = gameRooms[roomId];
         const player = room?.players[socket.id];
+        
+        // Remove do estado da sala se existir
+        if (room && room.neutralAsteroids[asteroidId]) {
+             delete room.neutralAsteroids[asteroidId];
+        }
+        
         if (player) {
             player.dinheiro += 25; 
             socket.emit('gainMoney', 25);
+            // Mostra texto flutuante apenas se foi convertido
+            if (converted) {
+                 socket.emit('showFloatingText', {
+                    text: `+ $25 (Convertido)`,
+                    color: '#00FF00'
+                });
+            }
+        }
+    });
+    
+    // NOVO: Servidor recebe info sobre asteroide neutro criado
+    socket.on('neutralAsteroidCreated', (data) => {
+        const { roomId, asteroidId, x, y } = data;
+        const room = gameRooms[roomId];
+        if (room) {
+            room.neutralAsteroids[asteroidId] = { id: asteroidId, x: x, y: y };
+        }
+    });
+    
+    // NOVO: Jogador ativou Conversor de Matéria
+    socket.on('activateMatterConverter', (roomId) => {
+         const room = gameRooms[roomId];
+         const player = room?.players[socket.id];
+         
+         if (player && player.upgrades.matterConverter > 0 && player.converterCooldown <= 0) {
+             player.converterCooldown = MATTER_CONVERTER_COOLDOWN; // Ativa cooldown
+             
+             let convertedCount = 0;
+             let totalGain = 0;
+             
+             // Emite evento para o cliente absorver VISUALMENTE os asteroides
+             // O servidor já removeu do seu estado interno
+             io.to(socket.id).emit('absorbNeutrals', Object.keys(room.neutralAsteroids));
+             
+             // Calcula ganho e limpa estado do servidor
+             for (const id in room.neutralAsteroids) {
+                 convertedCount++;
+                 totalGain += 25;
+                 delete room.neutralAsteroids[id];
+             }
+             
+             if (totalGain > 0) {
+                 player.dinheiro += totalGain;
+                 socket.emit('gainMoney', totalGain);
+                 socket.emit('showFloatingText', {
+                    text: `+ $${totalGain} (${convertedCount} Convertidos)`,
+                    color: '#00FF00',
+                    size: '1.5em'
+                 });
+             }
+             
+             io.to(roomId).emit('updateGameState', room.players); // Atualiza cooldown
+         }
+    });
+    
+    // NOVO: Jogador ativou Sobrecarga de Escudo
+    socket.on('activateShieldOverload', (roomId) => {
+        const room = gameRooms[roomId];
+        const player = room?.players[socket.id];
+        
+        if (player && player.upgrades.ultimate_shield > 0 && player.shieldOverloadCooldown <= 0) {
+            player.shieldOverloadCooldown = SHIELD_OVERLOAD_COOLDOWN; // Ativa cooldown
+            // Não precisa alterar o escudo aqui, o cliente fará isso visualmente
+            // O estado será sincronizado no próximo updateGameState
+            
+            // Informa o outro jogador sobre o EMP (para efeitos visuais se houver)
+            // socket.broadcast.to(roomId).emit('opponentUsedEMP');
+            
+            io.to(roomId).emit('updateGameState', room.players); // Atualiza cooldown
         }
     });
 
@@ -275,13 +361,12 @@ io.on('connection', (socket) => {
         }
     });
     
-    // 8. NOVO: Enviar Asteroide-Bomba
+    // 8. Enviar Asteroide-Bomba
     socket.on('sendBomberEnemy', (roomId) => {
-        const CUSTO = 400; // Custo de envio
+        const CUSTO = 400; 
         const room = gameRooms[roomId];
         const player = room?.players[socket.id];
         
-        // Requer o upgrade (nível 1) e dinheiro
         if (!player || player.upgrades.bomberAsteroid < 1 || player.dinheiro < CUSTO) return;
 
         const opponentId = Object.keys(room.players).find(id => id !== socket.id);
@@ -289,20 +374,65 @@ io.on('connection', (socket) => {
             player.dinheiro -= CUSTO;
             
             const enemyData = {
-                type: 'bomber', // NOVO TIPO
+                type: 'bomber', 
                 count: 1, 
-                health: 100 + (player.upgrades.asteroidVida * 10), // Vida alta
-                size: 1 + player.upgrades.asteroidMaior, // Afetado pelo tamanho
-                shoots: false, // Não atira (só explode)
-                bountyValue: 75 // Boa recompensa
+                health: 100 + (player.upgrades.asteroidVida * 10), 
+                size: 1 + player.upgrades.asteroidMaior, 
+                shoots: false, 
+                bountyValue: 75 
             };
             io.to(opponentId).emit('receiveEnemy', enemyData);
             io.to(roomId).emit('updateGameState', room.players);
         }
     });
+    
+    // 9. NOVO: Enviar Inibidor de Renda
+    socket.on('sendIncomeInhibitor', (roomId) => {
+        const CUSTO = 350; // Custo de envio
+        const room = gameRooms[roomId];
+        const player = room?.players[socket.id];
+        
+        // Requer o upgrade (nível 1) e dinheiro
+        if (!player || player.upgrades.incomeInhibitor < 1 || player.dinheiro < CUSTO) return;
+
+        const opponentId = Object.keys(room.players).find(id => id !== socket.id);
+        if (opponentId) {
+            player.dinheiro -= CUSTO;
+            
+            // Gera um ID único para este inibidor
+            const inhibitorId = `inhibitor_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+            
+            const enemyData = {
+                type: 'inhibitor', // NOVO TIPO
+                id: inhibitorId, // Envia o ID para o cliente
+                count: 1, 
+                health: 50, // Vida moderada
+                size: 1, // Tamanho fixo
+                shoots: false,
+                bountyValue: 20 // Pouca recompensa
+            };
+            
+            // Adiciona ao timer da sala (associado ao oponente)
+            room.inhibitorTimers[opponentId][inhibitorId] = 15; // 15 segundos para destruir
+            
+            io.to(opponentId).emit('receiveEnemy', enemyData);
+            io.to(roomId).emit('updateGameState', room.players);
+        }
+    });
+    
+    // NOVO: O cliente informa que destruiu um inibidor a tempo
+    socket.on('inhibitorDestroyed', (data) => {
+        const { roomId, inhibitorId } = data;
+        const room = gameRooms[roomId];
+        const myTimers = room?.inhibitorTimers[socket.id];
+        
+        if (myTimers && myTimers[inhibitorId] !== undefined) {
+            delete myTimers[inhibitorId]; // Remove do timer, efeito cancelado
+        }
+    });
 
 
-    // 9. Snapshot do Oponente
+    // 10. Snapshot do Oponente
     socket.on('sendSnapshot', (data) => {
         const { roomId, snapshot } = data;
         const room = gameRooms[roomId];
@@ -314,7 +444,7 @@ io.on('connection', (socket) => {
         }
     });
 
-    // 10. Desconexão
+    // 11. Desconexão
     socket.on('disconnect', () => {
         console.log(`Socket desconectado: ${socket.id}`);
         for (const roomId in gameRooms) {
@@ -325,7 +455,7 @@ io.on('connection', (socket) => {
                 if (opponentId) {
                     io.to(opponentId).emit('opponentLeft');
                 }
-                delete gameRooms[roomId];
+                delete gameRooms[roomId]; // Limpa a sala inteira
                 console.log(`Sala ${roomId} limpa.`);
                 break;
             }
@@ -333,54 +463,86 @@ io.on('connection', (socket) => {
     });
 });
 
-// Loop de Renda (ATUALIZADO para Juros)
+// Loop de Renda (ATUALIZADO para Cooldowns e Debuff)
 function startIncomeLoop(roomId) {
     const room = gameRooms[roomId];
     if (!room) return;
 
     const intervalId = setInterval(() => {
-        if (!gameRooms[roomId] || !gameRooms[roomId].gameRunning) {
+        const currentRoom = gameRooms[roomId]; // Pega a referência mais recente
+        if (!currentRoom || !currentRoom.gameRunning) {
             clearInterval(intervalId);
             return;
         }
 
         let stateChanged = false;
-        for (const playerId in room.players) {
-            const player = room.players[playerId];
+        for (const playerId in currentRoom.players) {
+            const player = currentRoom.players[playerId];
+            if (!player) continue;
+
+            // --- Cooldowns das Habilidades ---
+            if (player.converterCooldown > 0) {
+                player.converterCooldown--;
+                stateChanged = true;
+            }
+            if (player.shieldOverloadCooldown > 0) {
+                player.shieldOverloadCooldown--;
+                stateChanged = true;
+            }
             
-            // Renda normal
-            player.dinheiro += player.upgrades.income;
+            // --- Debuff de Renda ---
+            let incomeMultiplier = 1.0;
+            if (player.incomeDebuffDuration > 0) {
+                player.incomeDebuffDuration--;
+                incomeMultiplier = INCOME_DEBUFF_MULTIPLIER; // Aplica o debuff
+                stateChanged = true;
+            }
+            
+            // --- Renda Normal ---
+            player.dinheiro += Math.floor(player.upgrades.income * incomeMultiplier); // Aplica multiplicador
             stateChanged = true;
             
-            // Lógica do Banco Galáctico (Juros)
+            // --- Banco Galáctico (Juros) ---
             if (player.upgrades.galacticBank > 0) {
                 player.bankTimer--;
                 if (player.bankTimer <= 0) {
-                    player.bankTimer = 10; // Reseta timer de 10s
-                    
+                    player.bankTimer = 10; 
                     const bankLevel = player.upgrades.galacticBank;
-                    const taxaJuros = 0.01 + (bankLevel * 0.005); // 1.5% a 3.5%
-                    const tetoJuros = 20 + (bankLevel * 10);     // $30 a $70
-                    
+                    const taxaJuros = 0.01 + (bankLevel * 0.005); 
+                    const tetoJuros = 20 + (bankLevel * 10);     
                     let juros = Math.floor(player.dinheiro * taxaJuros);
-                    if (juros > tetoJuros) {
-                        juros = tetoJuros;
-                    }
-                    
+                    if (juros > tetoJuros) juros = tetoJuros;
                     if (juros > 0) {
                         player.dinheiro += juros;
-                        // Emite um evento leve para o jogador ver os juros
                         io.to(playerId).emit('showFloatingText', {
-                            text: `+ $${juros} (Juros)`,
-                            color: '#FFD700'
+                            text: `+ $${juros} (Juros)`, color: '#FFD700'
                         });
                     }
                 }
+                 stateChanged = true; // Timer mudou
             }
-        }
+            
+            // --- Timers dos Inibidores ---
+            const inhibitorTimers = currentRoom.inhibitorTimers[playerId];
+            for (const inhibitorId in inhibitorTimers) {
+                 inhibitorTimers[inhibitorId]--;
+                 if (inhibitorTimers[inhibitorId] <= 0) {
+                     // Tempo esgotou! Aplica debuff
+                     player.incomeDebuffDuration = INCOME_DEBUFF_DURATION;
+                     delete inhibitorTimers[inhibitorId]; // Remove o timer
+                     io.to(playerId).emit('showFloatingText', {
+                         text: `RENDA REDUZIDA! (-50% por ${INCOME_DEBUFF_DURATION}s)`,
+                         color: '#FF0000',
+                         size: '1.3em'
+                     });
+                     stateChanged = true;
+                 }
+            }
+            
+        } // Fim do loop de jogadores
 
         if (stateChanged) {
-            io.to(roomId).emit('updateGameState', room.players);
+            io.to(roomId).emit('updateGameState', currentRoom.players);
         }
     }, 1000); 
 }
