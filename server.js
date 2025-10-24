@@ -1,29 +1,19 @@
-// server.js - O CÉREBRO DO SEU JOGO MULTIPLAYER (v5.3 - Correção de CORS Manual)
+// server.js - O CÉREBRO DO SEU JOGO MULTIPLAYER (v5.4 - Novos Upgrades: Piercing, Bank, Bomber)
 const express = require('express');
 const http = require('http');
 const { Server } = require("socket.io");
-// const cors = require('cors'); // Não vamos usar este pacote
 
 const app = express();
 
 // ===================================================================
-// *** LINHA CORRIGIDA (Sem 'npm install') ***
-// Adicionando cabeçalhos CORS manualmente
+// *** Correção de CORS Manual (Sem 'npm install') ***
 app.use((req, res, next) => {
-    // Permite que qualquer domínio acesse este servidor (necessário para Vercel)
     res.setHeader('Access-Control-Allow-Origin', '*');
-    
-    // Métodos permitidos
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    
-    // Cabeçalhos permitidos
     res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
-    
-    // O navegador envia uma requisição "OPTIONS" primeiro (pre-flight)
     if (req.method === 'OPTIONS') {
         return res.sendStatus(200);
     }
-    
     next();
 });
 // ===================================================================
@@ -46,6 +36,7 @@ const UPGRADE_DEFINITIONS = {
     tiroDuplo:      { maxLevel: 1, baseCost: 150 },
     laser:          { maxLevel: 5, baseCost: 300 },
     homingMissile:  { maxLevel: 1, baseCost: 1000 },
+    piercingShots:  { maxLevel: 1, baseCost: 750 }, // NOVO
     // Nave
     velocidade:     { maxLevel: 3, baseCost: 50 },
     resistencia:    { maxLevel: 3, baseCost: 250 },
@@ -55,9 +46,11 @@ const UPGRADE_DEFINITIONS = {
     asteroidVida:   { maxLevel: 10, baseCost: 100 },
     asteroidMaior:  { maxLevel: 5, baseCost: 150 },
     sendCooldown:   { maxLevel: 5, baseCost: 200 },
+    bomberAsteroid: { maxLevel: 1, baseCost: 400 }, // NOVO (Custo para *desbloquear*)
     // Renda
     income:         { maxLevel: 99, baseCost: 10 },
     bounty:         { maxLevel: 5, baseCost: [300, 500, 800, 1300, 2100] },
+    galacticBank:   { maxLevel: 5, baseCost: 300 }, // NOVO
     
     // Upgrades Exclusivos
     ultimate_cluster: { maxLevel: 1, baseCost: 2500, dependency: 'tiroDuplo' },
@@ -70,13 +63,15 @@ function createPlayerState() {
     return {
         id: null,
         vidas: 3,
-        dinheiro: 100000,
-        hasUltimate: false, // Trava para upgrade exclusivo
+        dinheiro: 1000000,
+        hasUltimate: false,
+        bankTimer: 10, // NOVO: Timer para juros
         upgrades: {
             missil: 0,
             tiroDuplo: 0,
             laser: 0,
             homingMissile: 0,
+            piercingShots: 0, // NOVO
             velocidade: 0,
             resistencia: 0,
             escudo: 0,
@@ -84,8 +79,10 @@ function createPlayerState() {
             asteroidVida: 0,
             asteroidMaior: 0,
             sendCooldown: 0,
+            bomberAsteroid: 0, // NOVO
             income: 1,
             bounty: 0,
+            galacticBank: 0, // NOVO
             ultimate_cluster: 0,
             ultimate_laser: 0,
             ultimate_barrage: 0,
@@ -99,6 +96,10 @@ function getUpgradeCost(upgradeKey, currentLevel) {
     const def = UPGRADE_DEFINITIONS[upgradeKey];
     if (Array.isArray(def.baseCost)) {
         return def.baseCost[currentLevel] || Infinity;
+    }
+    // Custo progressivo para o Banco
+    if (upgradeKey === 'galacticBank') {
+        return Math.floor(def.baseCost * Math.pow(1.5, currentLevel));
     }
     return Math.floor(def.baseCost * Math.pow(1.15, currentLevel));
 }
@@ -237,6 +238,7 @@ io.on('connection', (socket) => {
             player.dinheiro -= CUSTO;
 
             const enemyData = {
+                type: 'normal',
                 count: 1 + player.upgrades.enviarMais,
                 health: 10 + (player.upgrades.asteroidVida * 5),
                 size: 1 + player.upgrades.asteroidMaior,
@@ -260,6 +262,7 @@ io.on('connection', (socket) => {
             player.dinheiro -= CUSTO;
             
             const enemyData = {
+                type: 'shooter',
                 count: 1, 
                 health: 50 + (player.upgrades.asteroidVida * 10),
                 size: 1 + player.upgrades.asteroidMaior,
@@ -271,8 +274,35 @@ io.on('connection', (socket) => {
             io.to(roomId).emit('updateGameState', room.players);
         }
     });
+    
+    // 8. NOVO: Enviar Asteroide-Bomba
+    socket.on('sendBomberEnemy', (roomId) => {
+        const CUSTO = 400; // Custo de envio
+        const room = gameRooms[roomId];
+        const player = room?.players[socket.id];
+        
+        // Requer o upgrade (nível 1) e dinheiro
+        if (!player || player.upgrades.bomberAsteroid < 1 || player.dinheiro < CUSTO) return;
 
-    // 8. Snapshot do Oponente
+        const opponentId = Object.keys(room.players).find(id => id !== socket.id);
+        if (opponentId) {
+            player.dinheiro -= CUSTO;
+            
+            const enemyData = {
+                type: 'bomber', // NOVO TIPO
+                count: 1, 
+                health: 100 + (player.upgrades.asteroidVida * 10), // Vida alta
+                size: 1 + player.upgrades.asteroidMaior, // Afetado pelo tamanho
+                shoots: false, // Não atira (só explode)
+                bountyValue: 75 // Boa recompensa
+            };
+            io.to(opponentId).emit('receiveEnemy', enemyData);
+            io.to(roomId).emit('updateGameState', room.players);
+        }
+    });
+
+
+    // 9. Snapshot do Oponente
     socket.on('sendSnapshot', (data) => {
         const { roomId, snapshot } = data;
         const room = gameRooms[roomId];
@@ -284,7 +314,7 @@ io.on('connection', (socket) => {
         }
     });
 
-    // 9. Desconexão
+    // 10. Desconexão
     socket.on('disconnect', () => {
         console.log(`Socket desconectado: ${socket.id}`);
         for (const roomId in gameRooms) {
@@ -303,7 +333,7 @@ io.on('connection', (socket) => {
     });
 });
 
-// Loop de Renda
+// Loop de Renda (ATUALIZADO para Juros)
 function startIncomeLoop(roomId) {
     const room = gameRooms[roomId];
     if (!room) return;
@@ -317,8 +347,36 @@ function startIncomeLoop(roomId) {
         let stateChanged = false;
         for (const playerId in room.players) {
             const player = room.players[playerId];
+            
+            // Renda normal
             player.dinheiro += player.upgrades.income;
             stateChanged = true;
+            
+            // Lógica do Banco Galáctico (Juros)
+            if (player.upgrades.galacticBank > 0) {
+                player.bankTimer--;
+                if (player.bankTimer <= 0) {
+                    player.bankTimer = 10; // Reseta timer de 10s
+                    
+                    const bankLevel = player.upgrades.galacticBank;
+                    const taxaJuros = 0.01 + (bankLevel * 0.005); // 1.5% a 3.5%
+                    const tetoJuros = 20 + (bankLevel * 10);     // $30 a $70
+                    
+                    let juros = Math.floor(player.dinheiro * taxaJuros);
+                    if (juros > tetoJuros) {
+                        juros = tetoJuros;
+                    }
+                    
+                    if (juros > 0) {
+                        player.dinheiro += juros;
+                        // Emite um evento leve para o jogador ver os juros
+                        io.to(playerId).emit('showFloatingText', {
+                            text: `+ $${juros} (Juros)`,
+                            color: '#FFD700'
+                        });
+                    }
+                }
+            }
         }
 
         if (stateChanged) {
