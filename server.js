@@ -70,7 +70,7 @@ function createPlayerState() {
     return {
         id: null,
         vidas: 3,
-        dinheiro: 0,
+        dinheiro: 100000,
         hasUltimate: false, // Trava para upgrade exclusivo
         upgrades: {
             missil: 0,
