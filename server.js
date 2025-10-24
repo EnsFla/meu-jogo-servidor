@@ -1,13 +1,37 @@
-// server.js - O CÉREBRO DO SEU JOGO MULTIPLAYER (v5.1 - Correção de Escopo)
+// server.js - O CÉREBRO DO SEU JOGO MULTIPLAYER (v5.3 - Correção de CORS Manual)
 const express = require('express');
 const http = require('http');
 const { Server } = require("socket.io");
+// const cors = require('cors'); // Não vamos usar este pacote
 
 const app = express();
+
+// ===================================================================
+// *** LINHA CORRIGIDA (Sem 'npm install') ***
+// Adicionando cabeçalhos CORS manualmente
+app.use((req, res, next) => {
+    // Permite que qualquer domínio acesse este servidor (necessário para Vercel)
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    
+    // Métodos permitidos
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    
+    // Cabeçalhos permitidos
+    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+    
+    // O navegador envia uma requisição "OPTIONS" primeiro (pre-flight)
+    if (req.method === 'OPTIONS') {
+        return res.sendStatus(200);
+    }
+    
+    next();
+});
+// ===================================================================
+
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
-        origin: "*",
+        origin: "*", // Isto controla a conexão websocket
         methods: ["GET", "POST"]
     }
 });
@@ -79,11 +103,7 @@ function getUpgradeCost(upgradeKey, currentLevel) {
     return Math.floor(def.baseCost * Math.pow(1.15, currentLevel));
 }
 
-// ===================================================================
-// *** LINHA CORRIGIDA ***
-// Esta linha estava faltando, causando o crash na desconexão.
 const gameRooms = {};
-// ===================================================================
 
 io.on('connection', (socket) => {
     console.log(`Socket conectado: ${socket.id}`);
@@ -167,7 +187,7 @@ io.on('connection', (socket) => {
         const room = gameRooms[roomId];
         const player = room?.players[socket.id];
         
-        if (player && room?.gameRunning) { // Adicionada verificação de room
+        if (player && room?.gameRunning) {
             player.vidas--;
             if (player.vidas <= 0) {
                 const opponentId = Object.keys(room.players).find(id => id !== socket.id);
@@ -267,7 +287,6 @@ io.on('connection', (socket) => {
     // 9. Desconexão
     socket.on('disconnect', () => {
         console.log(`Socket desconectado: ${socket.id}`);
-        // AQUI ESTAVA O ERRO (linha ~275)
         for (const roomId in gameRooms) {
             const room = gameRooms[roomId];
             if (room.players[socket.id]) {
