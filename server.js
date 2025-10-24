@@ -78,7 +78,7 @@ const SMUGGLER_LOOT_MAX = 100;
 
 function createPlayerState() {
     return {
-        id: null, vidas: 3, dinheiro: 0, hasUltimate: false, bankTimer: 10,
+        id: null, vidas: 3, dinheiro: 10000000, hasUltimate: false, bankTimer: 10,
         converterCooldown: 0, shieldOverloadCooldown: 0, hyperspaceCooldown: 0,
         incomeDebuffDuration: 0, mineCount: 0,
         upgrades: {
