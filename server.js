@@ -8,12 +8,20 @@ const app = express();
 // ===================================================================
 // *** Correção de CORS Manual (Sem 'npm install') ***
 app.use((req, res, next) => {
+    // Permite que qualquer domínio acesse este servidor (necessário para Vercel)
     res.setHeader('Access-Control-Allow-Origin', '*');
+
+    // Métodos permitidos
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+
+    // Cabeçalhos permitidos
     res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+
+    // O navegador envia uma requisição "OPTIONS" primeiro (pre-flight)
     if (req.method === 'OPTIONS') {
         return res.sendStatus(200);
     }
+
     next();
 });
 // ===================================================================
