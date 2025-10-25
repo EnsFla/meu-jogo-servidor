@@ -25,14 +25,7 @@ const io = new Server(server, {
         origin: "*", // Isto controla a conexão websocket
         methods: ["GET", "POST"]
     },
-    // ======================================================
-    // *** CORREÇÃO: Aumenta a tolerância de lag ***
-    // ======================================================
-    // Dá ao cliente 20 segundos (20000ms) para responder a um ping
-    // antes de ser desconectado. O padrão (5000ms) é muito baixo
-    // se o cliente travar (ex: ao gerar o snapshot).
     pingTimeout: 20000
-    // ======================================================
 });
 
 const PORT = process.env.PORT || 3000;
