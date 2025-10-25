@@ -1,7 +1,5 @@
 // server.js - O CÉREBRO DO SEU JOGO MULTIPLAYER (v5.8 - MAIS 10 Upgrades!)
-const SERVER_URL = 'https://meu-jogo-pvp.onrender.com';
-const socket = io(SERVER_URL); // <-- ATUALIZE AQUI
-let meuSocketId = null;
+
 const express = require('express');
 const http = require('http');
 const { Server } = require("socket.io");
@@ -28,15 +26,6 @@ const io = new Server(server, {
         methods: ["GET", "POST"]
     }
 });
-
-function keepAlive() {
-    fetch(SERVER_URL + '/keep-alive')
-        .then(res => res.json())
-        .then(data => console.log('Keep-alive ping:', data.status))
-        .catch(err => console.warn('Keep-alive ping falhou:', err));
-}
-
-setInterval(keepAlive, 300000);
 
 const PORT = process.env.PORT || 3000;
 
