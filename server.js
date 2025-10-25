@@ -1,4 +1,7 @@
 // server.js - O CÉREBRO DO SEU JOGO MULTIPLAYER (v5.8 - MAIS 10 Upgrades!)
+const SERVER_URL = 'https://meu-jogo-pvp.onrender.com';
+const socket = io(SERVER_URL); // <-- ATUALIZE AQUI
+let meuSocketId = null;
 const express = require('express');
 const http = require('http');
 const { Server } = require("socket.io");
@@ -138,7 +141,7 @@ const RISKY_INVEST_LOSS_CAP = 200;
 
 function createPlayerState() {
     return {
-        id: null, vidas: 3, dinheiro: 20000, 
+        id: null, vidas: 3, dinheiro: 100000, 
         hasUltimate: false, canHaveSecondUltimate: false, ultimateCount: 0,
         bankTimer: 10, riskyInvestTimer: RISKY_INVEST_TIMER,
         // Cooldowns
