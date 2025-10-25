@@ -19,6 +19,11 @@ app.use((req, res, next) => {
 });
 // ===================================================================
 
+app.get('/keep-alive', (req, res) => {
+    console.log("Keep-alive ping recebido!"); // Opcional: Para ver no log do servidor
+    res.json({ status: 'alive' }); // Envia uma resposta JSON válida
+});
+
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
