@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Asteroides - v9 WEBSOCKETS TESTE</title>
+
+<style>
+    
+    * {
+        box-sizing: border-box; 
+    }
+
+    body {
+        margin: 0;
+        padding: 20px; 
+        background: #000;
+        display: flex;
+        flex-direction: row;
+        justify-content: center; 
+        align-items: flex-start;
+        height: 100vh;
+        color: #ccc;
+        font-family: 'Courier New', 'Lucida Console', monospace;
+        overflow: hidden;
+        text-shadow: 0 0 4px rgba(204, 204, 204, 0.2);
+        gap: 20px; 
+    }
+
+    
+    .column {
+        height: calc(100vh - 40px); 
+        display: flex;
+        flex-direction: column;
+        background: #111; 
+        border: 3px double #555; 
+        padding: 15px;
+    }
+
+    
+    #roomUI {
+        position: absolute;
+        top: 0; left: 0;
+        width: 100vw; height: 100vh;
+        background: rgba(0, 0, 0, 0.85);
+        display: flex; 
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        z-index: 9999;
+        color: wheat;
+        font-size: 1.2em;
+    }
+    #roomUI h1 {
+        margin-top: 0;
+        text-shadow: 0 0 10px wheat;
+    }
+    #roomUI input, #roomUI button {
+        font-family: 'Courier New', monospace;
+        background: #111;
+        color: wheat;
+        border: 2px solid wheat;
+        padding: 10px;
+        font-size: 1em;
+        margin: 5px;
+    }
+    #roomUI button:hover {
+        background: wheat;
+        color: #000;
+        cursor: pointer;
+    }
+    #roomStatus {
+        margin-top: 15px;
+        color: #ff0;
+    }
+
+    
+    #opponentInfoColumn {
+        width: 340px;
+        display: flex; 
+        
+        overflow-wrap: break-word;
+    }
+
+    #opponentStats h2, #gameStats h2 {
+        margin: 0 0 10px 0;
+        padding-bottom: 5px;
+        border-bottom: 1px dashed #555;
+        color: #00ff00;
+        font-size: 1.2em;
+    }
+    #opponentStats p, #gameStats p {
+        margin: 5px 0;
+        font-size: 0.9em;
+        color: #ddd;
+    }
+    #opponentStats span, #gameStats span {
+        color: #fff;
+        font-weight: bold;
+    }
+
+    
+    #opponentCanvasContainer {
+            width: 100%;
+            aspect-ratio: 800 / 600;
+            background: #000;
+            border: 1px solid #444;
+            margin-top: 15px;
+            position: relative;
+            overflow: hidden;
+    }
+    #opponentCanvas {
+            border: 1px solid #444;
+            background: #1a1a1a;
+            width: 100%;
+            aspect-ratio: 800 / 600;
+            display: block;
+    }
+
+    
+    #gameAreaColumn {
+        width: 800px; 
+        padding: 0; 
+        border: 3px double #555;
+        background: #000;
+    }
+
+    #gameStats {
+        padding: 10px 15px;
+        background: #111;
+        border-bottom: 3px double #555;
+    }
+
+    #gameWrapper {
+        position: relative;
+        width: 800px;
+        height: 600px;
+    }
+    #canvasJogo { 
+        display: block;
+        background: #000;
+    }
+
+    #gameActions {
+        padding: 10px 15px;
+        background: #111;
+        border-top: 3px double #555;
+        flex-grow: 1;
+        overflow-y: auto;
+    }
+    #gameActions button {
+        background: #333;
+        border: 2px solid #777;
+        color: #eee;
+        font-family: 'Courier New', monospace;
+        padding: 8px 12px;
+        cursor: pointer;
+        margin: 5px;
+        font-size: 0.9em;
+    }
+    #gameActions button:hover {
+        background: #555;
+    }
+
+    
+    #shopColumn {
+        width: 340px;
+        border-left: 3px double #555;
+        padding: 0;
+        background: none;
+        display: flex;
+        overflow-wrap: break-word;
+    }
+
+    
+    #upgradeShop {
+        width: 100%;
+        height: 100%;
+        background: #1a1a1a;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+
+    .shop-nav {
+        display: flex;
+        width: 100%;
+        background: #0a0a0a;
+        border-bottom: 3px double #555;
+    }
+
+    .shop-nav-btn { 
+        flex-grow: 1;
+        padding: 10px 5px;
+        background: transparent;
+        border: none;
+        border-right: 1px solid #333;
+        color: #888;
+        font-family: 'Courier New', monospace;
+        font-size: 0.9em;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+    .shop-nav-btn:last-child {
+        border-right: none;
+    }
+    .shop-nav-btn:hover {
+        background: #333;
+        color: #ccc;
+    }
+    .shop-nav-btn.active {
+        background: #1a1a1a;
+        color: #00ff00;
+        text-shadow: 0 0 5px rgba(0, 255, 0, 0.5);
+        border-bottom: 1px solid #1a1a1a;
+        margin-bottom: -1px;
+    }
+
+    .shop-content-area {
+        flex-grow: 1;
+        overflow-y: auto;
+        padding: 15px;
+    }
+
+    .shop-tab-content { 
+        display: none;
+        flex-direction: column;
+        gap: 5px;
+    }
+    .shop-tab-content.active {
+        display: flex;
+    }
+
+    
+    #upgradeShop button {
+        background: #2a2a2a;
+        border: 2px solid #555;
+        color: #ccc;
+        font-family: 'Courier New', monospace;
+        font-size: 0.85em;
+        padding: 8px 10px;
+        margin-top: 0;
+        width: 100%;
+        text-align: left;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+    #upgradeShop button:hover:not(:disabled) {
+        background: #444;
+        color: #fff;
+        border-color: #777;
+    }
+     #upgradeShop button:disabled {
+        background: #222;
+        color: #666;
+        cursor: not-allowed;
+        border-color: #444;
+    }
+
+    
+    #upgradeShop .btn-ultimate {
+        color: #ffc107;
+        border-color: #a07c00;
+        background: #3a3000;
+    }
+    #upgradeShop .btn-ultimate:hover:not(:disabled) {
+        background: #5a4f00;
+        color: #fff;
+        border-color: #ffc107;
+    }
+
+    
+    #shopTooltip {
+        display: none;
+        position: absolute;
+        background: #000;
+        border: 2px solid #777;
+        color: #ccc;
+        padding: 10px;
+        font-size: 0.85em;
+        max-width: 300px;
+        z-index: 1000;
+        pointer-events: none;
+    }
+    #shopTooltip h4 {
+        margin: 0 0 5px 0;
+        color: #fff;
+    }
+    #shopTooltip p {
+        margin: 0;
+    }
+    #shopTooltip .cost {
+        color: wheat;
+        font-weight: bold;
+    }
+
+    
+    #modalFimDeJogo {
+        display: none;
+        position: absolute;
+        top: 0; left: 0;
+        width: 100vw; height: 100vh;
+        background: rgba(0, 0, 0, 0.9);
+        z-index: 10000;
+        justify-content: center;
+        align-items: center;
+    }
+    #modalFimDeJogo .modal-content {
+        background: #111;
+        border: 3px double #f00;
+        padding: 30px;
+        text-align: center;
+    }
+    #modalFimDeJogo h1 {
+        color: #f00;
+        margin-top: 0;
+    }
+    #modalFimDeJogo #botaoReiniciar {
+        font-family: 'Courier New', monospace;
+        background: #111;
+        color: #f00;
+        border: 2px solid #f00;
+        padding: 10px 20px;
+        font-size: 1.2em;
+        margin-top: 20px;
+        cursor: pointer;
+    }
+    #modalFimDeJogo #botaoReiniciar:hover {
+        background: #f00;
+        color: #000;
+    }
+
+    
+    #stasisOverlay, #inhibitorOverlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 50;
+        pointer-events: none;
+        display: none;
+    }
+    #stasisOverlay {
+        background: rgba(0, 150, 255, 0.15);
+        border: 3px dashed rgba(0, 150, 255, 0.5);
+    }
+    #inhibitorOverlay {
+        background: rgba(255, 0, 0, 0.1);
+    }
+
+    
+    #merchantContainer {
+        display: none;
+        position: absolute;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(10, 0, 20, 0.9);
+        border: 2px solid #8000ff;
+        box-shadow: 0 0 20px rgba(128, 0, 255, 0.7);
+        padding: 15px;
+        z-index: 1001;
+        width: 600px;
+        text-align: center;
+    }
+    #merchantContainer h3 {
+        margin-top: 0;
+        color: #8000ff;
+    }
+    #merchantItems {
+        display: flex;
+        justify-content: center;
+        gap: 10px;
+        margin-bottom: 10px;
+    }
+    #merchantContainer button {
+        background: #2a2a2a;
+        border: 2px solid #555;
+        color: #ccc;
+        font-family: 'Courier New', monospace;
+        padding: 8px 10px;
+        width: auto;
+        text-align: left;
+        cursor: pointer;
+    }
+    #merchantContainer button:hover:not(:disabled) {
+        background: #444;
+        color: #fff;
+    }
+     #merchantContainer button:disabled {
+        background: #222;
+        color: #666;
+    }
+    #merchantTimer {
+        color: #8000ff;
+        font-weight: bold;
+    }
+
+    
+    #floatingTextContainer {
+        position: absolute;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 400px;
+        z-index: 100;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        pointer-events: none;
+    }
+
+    
+    #floatingTextContainer > div {
+        background: rgba(20, 20, 20, 0.7);
+        border: 1px solid #555;
+        padding: 4px 12px;
+        color: #00ff00;
+        font-weight: bold;
+        font-size: 0.9em;
+        border-radius: 4px;
+        margin-bottom: 5px;
+        text-shadow: 0 0 5px #000;
+        animation: fadeOutAndUp 2.5s ease-out forwards;
+    }
+
+    
+    #floatingTextContainer > div.interest {
+        color: #00bfff;
+    }
+
+    
+    @keyframes fadeOutAndUp {
+        from {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        to {
+            opacity: 0;
+            transform: translateY(-25px);
+        }
+    }
+
+    
+    #playerHud {
+        display: none; 
+        position: absolute;
+        bottom: 10px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 200px;
+        z-index: 101; 
+        background: rgba(0, 0, 0, 0.3);
+        border: 1px solid #555;
+        padding: 5px;
+        border-radius: 4px;
+        pointer-events: none; 
+    }
+    .hud-bar {
+        width: 100%;
+        height: 10px;
+        background: #333; 
+        border: 1px solid #777;
+        margin-top: 4px;
+        border-radius: 5px; 
+        overflow: hidden; 
+    }
+    .hud-bar > div {
+        height: 100%;
+        width: 100%; 
+        transition: width 0.2s ease;
+        border-radius: 4px; 
+    }
+    #playerHudVida { background: linear-gradient(to right, #16a34a, #4ade80); } 
+    #playerHudEscudo { background: linear-gradient(to right, #0284c7, #38bdf8); } 
+    #playerHud p {
+        margin: 0 0 3px 0;
+        font-size: 0.8em;
+        text-align: center;
+        color: #ccc;
+    }
+
+    
+    #lowHealthVignette {
+        position: fixed; 
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        
+        box-shadow: inset 0 0 100px 15px rgba(255, 0, 0, 0.4); 
+        pointer-events: none; 
+        display: none; 
+        animation: pulse 1s infinite;
+        z-index: 100; 
+    }
+
+    @keyframes pulse {
+        0% { opacity: 0.6; }
+        50% { opacity: 1; }
+        100% { opacity: 0.6; }
+    }
+    
+
+    
+    #btnMute {
+        background: #060; 
+        border: 2px solid #0a0;
+        color: #eee;
+        font-family: 'Courier New', monospace;
+        padding: 6px 10px;
+        cursor: pointer;
+        margin-top: 10px; 
+        font-size: 0.85em;
+    }
+    #btnMute:hover {
+        background: #080;
+    }
+
+    
+    .hud-button {
+        
+    }
+
+</style>
+</head>
+<body>
+    <div id="roomUI">
+        <h1>koi no yokan</h1>
+        <p>queijo obrigado pela musica S2</p>
+        <input type="text" id="roomIdInput" placeholder="Digite o ID da Sala">
+        <button id="joinRoomBtn">Entrar / Criar Sala</button>
+        <div id="roomStatus"></div>
+    </div>
+
+    <div id="opponentInfoColumn" class="column">
+        <h3>Oponente</h3>
+        <div id="opponentStats">
+            <div>Vidas: <span id="opponentVidas">?</span></div>
+            <div>Dinheiro: $<span id="opponentDinheiro">?</span></div>
+            <div>Renda: $<span id="opponentRenda">?</span>/s</div>
+            <div id="opponentDebuffUI" style="display: none;">RENDA REDUZIDA!</div>
+        </div>
+        <h4>Minimapa</h4>
+        <div id="opponentCanvasContainer">
+            <canvas id="opponentCanvas" width="800" height="600"></canvas>
+        </div>
+        <div class="controls">
+             [W] = Mover | [Mouse] = Mirar | [Click Esq] = Atirar | [R]=Conv | [Shift]=Sobrecarga | [BTN Dir]=Salto | [C]=Stasis | [B]=Mercador | [X]=Reconfig | [V]=Hack | [T]=Orbital | [E]=Bateria
+        </div>
+    </div>
+
+    <div id="gameAreaColumn" class="column">
+        <div id="bossHealthContainer" style="display: none;">
+            <div class="health-bar-outer">
+                <div id="bossHealthBar" class="health-bar-inner" style="width: 100%;"></div>
+            </div>
+        </div>
+        <div id="gameWrapper" class="jogo-wrapper">
+            <div id="floatingTextContainer"></div>
+
+            
+            <div id="playerHud">
+                <p>NAVE</p>
+                <div class="hud-bar"><div id="playerHudVida"></div></div>
+                <div class="hud-bar"><div id="playerHudEscudo"></div></div>
+            </div>
+            
+
+            <div id="merchantContainer">
+                <h4>Mercador Galáctico</h4>
+                <div id="merchantItems"></div>
+                <div id="merchantTimer">Tempo restante: 10s</div>
+            </div>
+            <canvas id="canvasJogo" width="800" height="600"></canvas>
+        </div>
+        <div id="gameActions">
+            
+            <button id="btnSendEnemy" disabled>Enviar Asteroide (1) (Custo: 50)</button>
+            <button id="btnSendShooter" disabled>Enviar Atirador (2) (Custo: 250)</button>
+            <button id="btnSendBomber" disabled>Enviar Bomba (3) (Custo: 400)</button>
+            <button id="btnSendInhibitor" disabled>Enviar Inibidor (4) (Custo: 350)</button>
+            <button id="btnSendMines" disabled>Enviar Minas (5) (Custo: 200)</button>
+            <button id="btnSendHunter" disabled>Enviar Caçador (6) (Custo: 650)</button>
+            <button id="btnSendDisruptor" disabled>Enviar Disruptor (7) (Custo: 600)</button>
+            <button id="btnSendSpectral" disabled>Enviar Espectral (8) (Custo: 500)</button>
+        </div>
+        <div id="gameStats">
+            <div>Vidas: <span id="playerVidas">?</span> | Dinheiro: $<span id="playerDinheiro">?</span> | Renda: $<span id="playerRenda">?</span>/s</div>
+            <div id="converterCooldownUI" class="cooldown-indicator" style="display: none;">Conversor [R]: <span class="cooldown-status"></span></div>
+            <div id="overloadCooldownUI" class="cooldown-indicator" style="display: none;">Sobrecarga [Shift]: <span class="cooldown-status"></span></div>
+            <div id="jumpCooldownUI" class="cooldown-indicator" style="display: none;">Salto [BTN Dir]: <span class="cooldown-status"></span></div>
+            <div id="stasisCooldownUI" class="cooldown-indicator" style="display: none;">Stasis [C]: <span class="cooldown-status"></span></div>
+            <div id="merchantCooldownUI" class="cooldown-indicator" style="display: none;">Mercador [B]: <span class="cooldown-status"></span></div>
+            <div id="reconfigCooldownUI" class="cooldown-indicator" style="display: none;">Reconfig [X]: <span class="cooldown-status"></span></div>
+            <div id="hackCooldownUI" class="cooldown-indicator" style="display: none;">Hack [V]: <span class="cooldown-status"></span></div>
+            <div id="orbitalCooldownUI" class="cooldown-indicator" style="display: none;">Orbital [T]: <span class="cooldown-status"></span></div>
+            <div id="batteryChargeUI" class="cooldown-indicator" style="display: none;">Bateria [E]: <span id="batteryCharges">0</span>/3 Cargas</div>
+            
+            
+            <button id="btnMute">Mutar Som</button>
+            
+        </div>
+    </div>
+
+<div id="shopColumn" class="column">
+        <div id="upgradeShop">
+
+            <div class="shop-nav">
+                
+                <button id="btnTabNave" class="shop-nav-btn active" data-tab="nave">Nave</button>
+                <button id="btnTabArmas" class="shop-nav-btn" data-tab="armas">Armas</button>
+                <button id="btnTabRenda" class="shop-nav-btn" data-tab="renda">Renda</button>
+                <button id="btnTabAtaque" class="shop-nav-btn" data-tab="ataque">Ataque</button>
+                <button id="btnTabExclusivos" class="shop-nav-btn" data-tab="exclusivos">Exclusivos</button>
+            </div>
+
+            <div class="shop-content-area">
+
+                
+                <div id="tabNave" class="shop-tab-content active">
+                    <button id="btnBuy-velocidade">Velocidade</button>
+                    <button id="btnBuy-resistencia">Resistência (+1 Vida)</button>
+                    <button id="btnBuy-escudo">Escudo</button>
+                    <button id="btnBuy-matterConverter">Conversor de Matéria (R)</button>
+                    <button id="btnBuy-hyperspaceJump">Salto Hiper-Espacial (BTN Dir)</button>
+                    <button id="btnBuy-repulsorField">Repulsor de Detritos</button>
+                    <button id="btnBuy-stasisField">Campo de Stasis (C)</button>
+                    <button id="btnBuy-energyReconfig">Reconfiguração Energia (X)</button>
+                    <button id="btnBuy-kineticAccelerator">Acelerador Cinético</button>
+                    <button id="btnBuy-cargoCollector">Coletor Automático Carga</button>
+                </div>
+
+                <div id="tabArmas" class="shop-tab-content">
+                    <button id="btnBuy-tiroDuplo">Tiro Duplo</button>
+                    <button id="btnBuy-missil">Míssil (Dano Área)</button>
+                    <button id="btnBuy-laser">Laser (Feixe Contínuo)</button>
+                    <button id="btnBuy-homingMissile">Míssil Teleguiado</button>
+                    <button id="btnBuy-piercingShots">Projéteis Perfurantes</button>
+                    <button id="btnBuy-cryoAmmo">Munição Criogênica</button>
+                    <button id="btnBuy-enhancedCharge">Carga Expl. Aprimorada (Homing)</button>
+                    <button id="btnBuy-napalmFragments">Fragmentos Incendiários (Míssil)</button>
+                    <button id="btnBuy-superchargeCore">Núcleo de Supercarga</button>
+                    <button id="btnBuy-unstableMunitions">Munição Instável</button>
+                    <button id="btnBuy-targetingComputer">Computador de Mira</button>
+                    <button id="btnBuy-chainReaction">Reação em Cadeia</button>
+                    <button id="btnBuy-batteryCannons">Canhões de Bateria (E)</button>
+                    <button id="btnBuy-ricochetMissiles">Micro-Mísseis Ricochete</button>
+                    <button id="btnBuy-laserAmplifier">Amplificador Laser</button>
+                    <button id="btnBuy-deepFreeze">Congelamento Profundo (Crio)</button>
+                    <button id="btnBuy-orbitalMarker">Marcador Orbital (T)</button>
+                </div>
+
+                <div id="tabRenda" class="shop-tab-content">
+                    <button id="btnBuy-income">Upgrade Renda</button>
+                    <button id="btnBuy-bounty">Recompensa (+10%)</button>
+                    <button id="btnBuy-galacticBank">Banco Galáctico (Juros)</button>
+                    <button id="btnBuy-starSmuggler">Contrabandista Estelar</button>
+                    <button id="btnBuy-merchantCall">Chamado do Mercador (B)</button>
+                    <button id="btnBuy-combatRecycler">Reciclador de Combate</button>
+                    <button id="btnBuy-rewardHack">Hack de Recompensa (V)</button>
+                    <button id="btnBuy-attritionTax">Taxa de Atrito</button>
+                </div>
+
+                <div id="tabAtaque" class="shop-tab-content">
+                    <button id="btnBuy-enviarMais">+1 Asteroide</button>
+                    <button id="btnBuy-asteroidVida">+Vida Unidade</button>
+                    <button id="btnBuy-asteroidMaior">+Tamanho Unidade</button>
+                    <button id="btnBuy-sendCooldown">Reduzir Cooldown (Envio)</button>
+                    <button id="btnBuy-bomberAsteroid">Desbloquear Asteroide-Bomba</button>
+                    <button id="btnBuy-incomeInhibitor">Desbloquear Inibidor Renda</button>
+                    <button id="btnBuy-minefieldDeploy">Desbloquear Campo Minado</button>
+                    <button id="btnBuy-advancedTargeting">Mira Laser Avançada (Atirador)</button>
+                    <button id="btnBuy-hunterAsteroid">Desbloquear Ast. Caçador</button>
+                    <button id="btnBuy-impactShrapnel">Impacto Fragmentado</button>
+                    <button id="btnBuy-ricochetShots">Tiros Ricochete (Atirador)</button>
+                    <button id="btnBuy-volatileCore">Núcleo Volátil</button>
+                    <button id="btnBuy-shieldDisruptor">Desbloquear Disruptor Escudo</button>
+                    <button id="btnBuy-reinforcedHull">Blindagem Reforçada</button>
+                    <button id="btnBuy-toxicShards">Estilhaços Tóxicos (Bomba)</button>
+                    <button id="btnBuy-spectralShip">Desbloquear Nave Espectral</button>
+                </div>
+
+                <div id="tabExclusivos" class="shop-tab-content">
+                    <button id="btnBuy-masterOfArms">Mestre das Armas (2º Exclusivo)</button>
+                    <button id="btnBuy-ultimate_cluster" class="btn-ultimate">Canhão de Fragmentação</button>
+                    <button id="btnBuy-ultimate_laser" class="btn-ultimate">Laser Purgatório</button>
+                    <button id="btnBuy-ultimate_prism" class="btn-ultimate">Prisma Divisor</button>
+                    <button id="btnBuy-ultimate_barrage" class="btn-ultimate">Barragem de Saturação</button>
+                    <button id="btnBuy-ultimate_swarm" class="btn-ultimate">Enxame Teleguiado</button>
+                    <button id="btnBuy-ultimate_singularity" class="btn-ultimate">Disparo de Singularidade</button>
+                    <button id="btnBuy-ultimate_shield" class="btn-ultimate">Sobrecarga de Escudo (Shift)</button>
+                    <button id="btnBuy-ultimate_stealthMines" class="btn-ultimate">Minas Camufladas</button>
+                    <button id="btnBuy-ultimate_barrageCoord" class="btn-ultimate">Barragem Coordenada (Atirador)</button>
+                    <button id="btnBuy-ultimate_blackMarket" class="btn-ultimate">Mercado Negro</button>
+                    <button id="btnBuy-ultimate_riskyInvest" class="btn-ultimate">Investimento de Risco</button>
+                    <button id="btnBuy-ultimate_effConversion" class="btn-ultimate">Conversão Eficiente</button>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <div id="shopTooltip"></div>
+
+    <div id="modalFimDeJogo">
+        <div class="modal-content">
+            <h1 id="modalTitulo">FIM DE JOGO</h1>
+            <h2 id="modalPontuacao">Sua pontuação: 0</h2>
+            <button id="botaoReiniciar">Tentar Novamente</button>
+        </div>
+    </div>
+
+    
+    <div id="lowHealthVignette"></div>
+    
+
+    <script>
+        const clientServerUrl = (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_SERVER_URL)
+                          ? process.env.NEXT_PUBLIC_SERVER_URL
+                          : 'https://meu-jogo-pvp.onrender.com';
+
+        const socketIoScript = document.createElement('script');
+        socketIoScript.src = clientServerUrl + '/socket.io/socket.io.js';
+        socketIoScript.onload = function() {
+            const gameScript = document.createElement('script');
+            gameScript.src = 'jogo.js';
+            document.body.appendChild(gameScript);
+        };
+        socketIoScript.onerror = function() {
+            console.error("Falha ao carregar o script do Socket.IO do servidor:", clientServerUrl);
+        };
+        document.body.appendChild(socketIoScript);
+    </script>
+</body>
+</html>
