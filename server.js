@@ -1,8 +1,6 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require("socket.io");
-const SERVER_URL = process.env.SERVER_URL;
-const SOCKET_IO_URL = process.env.SOCKET_IO_URL;
 
 const app = express();
 
